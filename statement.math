@@ -1,7 +1,11 @@
 Hypothesis:
     let ABC iso base AC
-    AB = AC
+    let FBDC square
+    let ABCDEFGHI equilateral
+    AG = AH
+    AF = AH
 
 Proof:
-    angABC = 60
-    AB = AC
+    AB = BC
+    FB = DC
+    AG = AH

@@ -49,6 +49,12 @@ def tokenize(code: str) -> List[Token]:
             elif line[pos:].startswith('iso'):
                 tokens.append(Token('ISO', 'iso', line_num))
                 pos += 3
+            elif line[pos:].startswith('square'):
+                tokens.append(Token('SQUARE', 'square', line_num))
+                pos += 6
+            elif line[pos:].startswith('equilateral'):
+                tokens.append(Token('EQUILATERAL', 'equilateral', line_num))
+                pos += 6
             elif line[pos:].startswith('base'):
                 tokens.append(Token('BASE', 'base', line_num))
                 pos += 4
@@ -108,7 +114,6 @@ class Statement:
     objects: List[str]  # ABC, AC, BC, etc.
     value: Optional[str] = None  # For equalities/angles
     line: int = 0
-
 
 class Parser:
     def __init__(self, tokens: List[Token]):
@@ -188,15 +193,41 @@ class Parser:
                 else:
                     equal_sides = [points[0] + points[1], points[0] + points[2]]
 
-                statements.append(Statement('equality', equal_sides, line=line))
+                for i in range(len(equal_sides) - 1):
+                    statements.append(Statement('equality', [equal_sides[i], equal_sides[i + 1]], line=line))
+
+            if self.current().type == 'SQUARE':
+                self.advance()
+                points = list(obj)
+                if len(points) != 4:
+                    print(f"Syntax Error on line {line}: 'iso' requires a 4-point plane, given: {''.join(points)}")
+                    sys.exit(1)
+
+                for i in range(len(points)-2):
+                    statements.append(Statement('equality', [points[i] + points[i + 1], points[i+1] + points[(i + 2)%len(points)]], line=line))
+
+            if self.current().type == 'EQUILATERAL':
+                self.advance()
+                points = list(obj)
+                for i in range(len(points) - 2):
+                    statements.append(Statement('equality', [points[i] + points[i + 1],
+                                                             points[i + 1] + points[(i + 2) % len(points)]], line=line))
+
+
 
         elif self.current().type == 'IDENT':
             left = self.current().value
             self.advance()
-
             if self.current().type == 'EQUALS':
                 self.advance()
-                right = self.current().value if self.current().type == 'IDENT' else None
+                if self.current().type != 'IDENT':
+                    print(f"Syntax Error on line {line}: Expected identifier after '='")
+                    sys.exit(1)
+                right = self.current().value
+                if len(right) != len(left):
+                    print(
+                        f"Syntax Error on line {line}: Only two objects with the same amount of points can be equal (given {obj}, {right})")
+                    sys.exit(1)
                 self.advance()
                 statements.append(Statement('equality', [left, right], line=line))
 
@@ -222,15 +253,39 @@ class Validator:
         self.known_equalities: Set[frozenset] = set()  # Track proven equalities
         self.errors: List[str] = []
 
+    def normalize_edge(self, edge: str) -> str:
+        return ''.join(sorted(edge))
+
     def validate(self, hypothesis: Optional[HypothesisBlock], proofs: List[Statement]):
         # Process hypothesis first to build known equalities
         if hypothesis:
             for stmt in hypothesis.statements:
                 self.process_statement(stmt, is_hypothesis=True)
+            self.propagate_transitivity()
+            print("DEBUG: after propagate_transitivity, know_equalities: ", self.known_equalities)
 
-        # Now validate proofs against known equalities
+        # validate proofs against known equalities
         for stmt in proofs:
             self.process_statement(stmt, is_hypothesis=False)
+
+    def propagate_transitivity(self):
+        changed = True
+        while changed:
+            changed = False
+
+            eq_list = list(self.known_equalities)
+
+            for i, eq1 in enumerate(eq_list):
+                for eq2 in eq_list[i + 1:]:
+                    if eq1 & eq2:
+                        union = eq1 | eq2
+                        self.known_equalities.discard(eq1)
+                        self.known_equalities.discard(eq2)
+                        self.known_equalities.add(union)
+                        changed = True
+                        break
+                if changed:
+                    break
 
     def process_statement(self, stmt: Statement, is_hypothesis: bool):
         if stmt.type == 'let':
@@ -240,28 +295,52 @@ class Validator:
             print(f"DEBUG: Points = {points}")
             for p in points:
                 self.defined_objects.add(p)
-            if len(points) == 3:
+            if len(points) > 2:
                 print(f"DEBUG: Adding edges for {points}")
-                self.defined_edges.add(tuple(sorted([points[0], points[1]])))
-                self.defined_edges.add(tuple(sorted([points[1], points[2]])))
-                self.defined_edges.add(tuple(sorted([points[0], points[2]])))
+                for point in points:
+                    for other_point in points:
+                        if point != other_point:
+                            self.defined_edges.add(tuple(sorted([point, other_point])))
                 print(f"DEBUG: defined_edges = {self.defined_edges}")
         if stmt.type == 'equality':
-            left, right = stmt.objects[0], stmt.objects[1]
+            left_str, right_str = stmt.objects[0], stmt.objects[1]
+            left = self.normalize_edge(stmt.objects[0])
+            right = self.normalize_edge(stmt.objects[1])
 
             if not self.edge_exists(left):
-                self.errors.append(f"Line {stmt.line}: '{left}' is not a defined edge")
+                self.errors.append(f"Line {stmt.line}: '{left_str}' is not a defined edge")
             if not self.edge_exists(right):
-                self.errors.append(f"Line {stmt.line}: '{right}' is not a defined edge")
+                self.errors.append(f"Line {stmt.line}: '{right_str}' is not a defined edge")
 
             equality_pair = frozenset([left, right])
 
             if is_hypothesis:
                 self.known_equalities.add(equality_pair)
+                print(f"DEBUG: known_equalities = {self.known_equalities}")
             else:
-                # In proofs, the equality must be already known
-                if equality_pair not in self.known_equalities:
-                    self.errors.append(f"Line {stmt.line}: '{left} = {right}' is unproven")
+                if stmt.type == 'equality':
+                    left = self.normalize_edge(stmt.objects[0])
+                    right = self.normalize_edge(stmt.objects[1])
+
+                    if not self.edge_exists(left):
+                        self.errors.append(f"Line {stmt.line}: '{left}' is not a defined edge")
+                    if not self.edge_exists(right):
+                        self.errors.append(f"Line {stmt.line}: '{right}' is not a defined edge")
+
+                    left_class = None
+                    right_class = None
+
+                    for eq_class in self.known_equalities:
+                        if left in eq_class:
+                            left_class = eq_class
+                        if right in eq_class:
+                            right_class = eq_class
+
+                    if is_hypothesis:
+                        self.known_equalities.add(frozenset([left, right]))
+                    else:
+                        if left_class is None or right_class is None or left_class != right_class:
+                            self.errors.append(f"Line {stmt.line}: '{left} = {right}' is unproven")
                 else:
                     self.known_equalities.add(equality_pair)
 
