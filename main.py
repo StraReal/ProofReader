@@ -226,7 +226,7 @@ class Parser:
                 right = self.current().value
                 if len(right) != len(left):
                     print(
-                        f"Syntax Error on line {line}: Only two objects with the same amount of points can be equal (given {obj}, {right})")
+                        f"Syntax Error on line {line}: Only two objects with the same amount of points can be equal (given {left}, {right})")
                     sys.exit(1)
                 self.advance()
                 statements.append(Statement('equality', [left, right], line=line))
