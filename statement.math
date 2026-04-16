@@ -1,0 +1,7 @@
+Hypothesis:
+    let ABC iso base AC
+    AB = AC
+
+Proof:
+    angABC = 60
+    AB = AC
