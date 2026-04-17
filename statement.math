@@ -1,11 +1,16 @@
+import BasicAxioms
+
 Hypothesis:
-    let ABC iso base AC
-    let FBDC square
-    let ABCDEFGHI equilateral
-    AG = AH
-    AF = AH
+    let ABC
+    let GHI
+    AB = GH
+    BC = HI
+    angABC = angGHI
+
 
 Proof:
-    AB = BC
-    FB = DC
-    AG = AH
+    SideAngleSideCongruence { ABC GHI } => ABC = GHI
+    angABC = angGHI
+
+    CorrespondingPartsCongruent { ABC GHI } => angBCA = angHIG
+    angBCA = angHIG

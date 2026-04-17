@@ -1,0 +1,32 @@
+axiom SideAngleSideCongruence:
+    Given:
+        let ABC
+        let DEF
+        AB = DE
+        BC = EF
+        angABC = angDEF
+    Then:
+        ABC = DEF
+
+axiom SideSideSideCongruence:
+    Given:
+        let ABC
+        let DEF
+        AB = DE
+        BC = EF
+        CA = FD
+    Then:
+        ABC = DEF
+
+axiom CorrespondingPartsCongruent:
+    Given:
+        let ABC
+        let DEF
+        ABC = DEF
+    Then:
+        AB = DE
+        BC = EF
+        CA = FD
+        angCAB = angFDE
+        angABC = angDEF
+        angBCA = angEFD

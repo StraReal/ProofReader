@@ -1,0 +1,9 @@
+theorem SideAngleSideCongruence:
+    Given:
+        let ABC
+        let DEF
+        AB = DE
+        BC = EF
+        angABC = angDEF
+    Then:
+        ABC = DEF
