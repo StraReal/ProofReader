@@ -30,3 +30,9 @@ axiom CorrespondingPartsCongruent:
         angCAB = angFDE
         angABC = angDEF
         angBCA = angEFD
+
+axiom AngleSum:
+    Given:
+        let ABC
+    Then:
+        angABC + angBCA + angCAB = 180

@@ -1,16 +1,19 @@
-import BasicAxioms
+#import BasicAxioms
+
+axiom SupplementaryAngles:
+    Given:
+        let ABC
+        let ABD
+        let x_1
+        AB + AD = x_1
+    Then:
+        AB = x_1 - AD
 
 Hypothesis:
     let ABC
-    let GHI
-    AB = GH
-    BC = HI
-    angABC = angGHI
-
+    let D
+    AB != BD
+    AB + AD = 70
 
 Proof:
-    SideAngleSideCongruence { ABC GHI } => ABC = GHI
-    angABC = angGHI
-
-    CorrespondingPartsCongruent { ABC GHI } => angBCA = angHIG
-    angBCA = angHIG
+    SupplementaryAngles{ABC ABD 70} => AB = 70 - AD

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Set
+from typing import List, Optional, Dict, Set, Tuple
+import sys
 
 @dataclass
 class Statement:
@@ -18,12 +19,23 @@ class AxiomDefinition:
     given: HypothesisBlock
     then: List[Statement]
     let_objects: List[str]
+    let_numvars: List[str]
+
+@dataclass
+class TheoremDefinition:
+    name: str
+    given: HypothesisBlock
+    then: List[Statement]
+    proof: List[Statement]
+    let_objects: List[str]
+    let_numvars: List[str]
 
 @dataclass
 class Token:
     type: str  # 'HYPOTHESIS', 'LET', 'IDENT', 'EQUALS', 'ANGLE', 'NUMBER', 'COLON', 'EOF'...
     value: str
-    line: int
+    line_num: int
+    line: str
 
 def load_file(filename: str) -> str:
     try:
