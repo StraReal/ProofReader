@@ -51,12 +51,18 @@ def tokenize(code: str) -> List[Token]:
             elif line[pos:].startswith('iso'):
                 tokens.append(Token('ISO', 'iso', line_num, line))
                 pos += 3
+            elif line[pos:].startswith('median'):
+                tokens.append(Token('MEDIAN', 'median', line_num, line))
+                pos += 6
+            elif line[pos:].startswith('bisector'):
+                tokens.append(Token('BISECTOR', 'bisector', line_num, line))
+                pos += 8
             elif line[pos:].startswith('square'):
                 tokens.append(Token('SQUARE', 'square', line_num, line))
                 pos += 6
             elif line[pos:].startswith('equilateral'):
                 tokens.append(Token('EQUILATERAL', 'equilateral', line_num, line))
-                pos += 6
+                pos += 11
             elif line[pos:].startswith('base'):
                 tokens.append(Token('BASE', 'base', line_num, line))
                 pos += 4
@@ -81,13 +87,13 @@ def tokenize(code: str) -> List[Token]:
                 while pos < len(line) and (line[pos].isalnum() or line[pos] == '_'):
                     word += line[pos]
                     pos += 1
+                # numvars x_1, y_1827, z_13
                 if re.match(r'^[xyz]_\d+$', word):
                     tokens.append(Token('NUMVAR', word, line_num, line))
                 else:
                     tokens.append(Token('IDENT', word, line_num, line))
                 continue
 
-            # Numbers
             elif line[pos].isdigit():
                 num = ''
                 while pos < len(line) and line[pos].isdigit():
@@ -142,14 +148,15 @@ original_lines = code.split('\n')
 for i, line in enumerate(original_lines, start=1):
     import_map[i] = (filename, i)
 
-import_map = {}
 original_lines = code.split('\n')
 file_tracker = [(filename, i + 1) for i in range(len(code.split('\n')))]
+import_map = {i + 1: file_tracker[i] for i in range(len(file_tracker))}
 
 while True:
     tokens = tokenize(code)
-    parser = Parser(tokens)
-    axioms, theorems, hypothesis, proofs, to_import = parser.parse()
+    import_map = {i + 1: file_tracker[i] for i in range(len(file_tracker))}
+    parser = Parser(tokens, import_map)
+    axioms, theorems, hypothesis, proofs, to_import, ordered = parser.parse()
 
     if not to_import:
         break
@@ -173,7 +180,7 @@ while True:
 import_map = {i + 1: file_tracker[i] for i in range(len(file_tracker))}
 
 validator = Validator(import_map)
-validator.validate(axioms, theorems, hypothesis, proofs)
+validator.validate(axioms, hypothesis, ordered, proofs)
 
 print("=== Axioms ===")
 for name, axiom in axioms.items():

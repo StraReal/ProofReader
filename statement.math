@@ -1,18 +1,29 @@
 import BasicAxioms
 
-theorem WrongTheorem:
-    Given:
-        let ABC
-    Then:
-        angABC+angBCA+angCAB=180
-    Proof:
-        AngleSum{ABC} => angABC + angBCA + angCAB = 180
+#theorem AngleSideAngleCongruence: #didnt prove this correctly yet
+#    Given:
+#        let ABC
+#        let DEF
+#        angABC = angDEF
+#        BC = EF
+#        angBCA = angEFD
+#    Then:
+#        ABC = DEF
+#    Proof:
+#        AngleSum{ABC} => angABC + angBCA + angCAB = 180
+#        angABC + angBCA = 180-angCAB
+
 
 Hypothesis:
     let ABC
+    let GHI
     let D
+    let M median AB
     AB != BD
     angABC - angABD = 70
 
 Proof:
+    SegmentAddition{AM MB} => AM+MB = AB
+    AM + MB = AB
     AngleSum{ABC} => angABC + angBCA + angCAB = 180
+    AngleSideAngleCongruence{ABC GHI} => ABC = GHI

@@ -1,12 +1,23 @@
 from common_classes import *
 
 class Parser:
-    def __init__(self, tokens: List[Token]):
+    def __init__(self, tokens: List[Token], import_map: dict):
         self.tokens = tokens
         self.pos = 0
         self.axioms: Dict[str, AxiomDefinition] = {}
         self.theorems: Dict[str, TheoremDefinition] = {}
-        print(self.tokens)
+        self.import_map: dict = import_map
+
+    def _err(self, line, msg):
+        file, lineno = self.get_infile_line(line)
+        return f"{file} | Line {lineno}: {msg}"
+
+    def get_infile_line(self, line_num):
+        if line_num in self.import_map:
+            filename, original_line = self.import_map[line_num]
+            return (filename, original_line)
+        else:
+            return (None, line_num)
 
     def current(self) -> Token:
         return self.tokens[self.pos] if self.pos < len(self.tokens) else self.tokens[-1]
@@ -14,21 +25,26 @@ class Parser:
     def advance(self):
         self.pos += 1
 
-    def parse(self) -> tuple[Dict[str, AxiomDefinition], Dict[str, TheoremDefinition], Optional[HypothesisBlock], List[Statement], list]:
+    def parse(self) -> tuple[Dict[str, AxiomDefinition], Dict[str, TheoremDefinition], Optional[HypothesisBlock], List[Statement], list, list]:
         hypothesis = None
         proofs = []
+        ordered = []
 
         while self.current().type != 'EOF':
             if self.current().type == 'AXIOM':
                 axiom = self.parse_axiom()
                 self.axioms[axiom.name] = axiom
+                ordered.append(('axiom', axiom))
+
             elif self.current().type == 'THEOREM':
                 theorem = self.parse_theorem()
                 self.theorems[theorem.name] = theorem
+                ordered.append(('theorem', theorem))
+
             elif self.current().type == 'IMPORT':
                 self.advance()
                 if self.current().type == 'IDENT':
-                    return self.axioms, self.theorems, hypothesis, proofs, [self.current().value, self.current().line_num]
+                    return self.axioms, self.theorems, hypothesis, proofs, [self.current().value, self.current().line_num], ordered
             elif self.current().type == 'HYPOTHESIS':
                 self.advance()
                 if self.current().type == 'COLON':
@@ -40,7 +56,7 @@ class Parser:
                 if stmt:
                     proofs.extend(stmt)
 
-        return self.axioms, self.theorems, hypothesis, proofs, []
+        return self.axioms, self.theorems, hypothesis, proofs, [], ordered
 
     def parse_hypothesis_block(self, stop_tokens: List[str] = None) -> HypothesisBlock:
         if stop_tokens is None:
@@ -158,58 +174,31 @@ class Parser:
 
         return TheoremDefinition(name, given, then_statements, proof_statements, let_objects, let_numvars)
 
-    def parse_sum_operands(self, first_operand: str, allowed_type: str) -> List[tuple]:
+    def parse_sum_operands(self, first_operand: str, allowed_types: Sequence[str]) -> List[tuple]:
         """Returns list of (sign, name) pairs. First operand always gets '+'."""
         operands = [('+', first_operand)]
         while self.current().type in ('PLUS', 'MINUS'):
             sign = '+' if self.current().type == 'PLUS' else '-'
             self.advance()
-            if self.current().type != allowed_type:
+            if self.current().type not in allowed_types:
                 line = self.current().line_num
-                line_val = self.current().line
-                print(f"{line}| {line_val}\nSyntax Error on line {line}: Expected {allowed_type} after '+'/'-'")
+                print(self._err(line, f"Syntax Error: Expected {allowed_types} after '+'/'-'"))
                 sys.exit(1)
             operands.append((sign, self.current().value))
             self.advance()
         return operands
 
-    # parser.py
-
-    def parse_axiom_bindings(self, axiom: AxiomDefinition) -> Dict[str, str]:
-        bindings = {}
-        provided_objects = []
-
+    def parse_axiom_bindings(self) -> list:
+        raw_args = []
         while self.current().type != 'RBRACE':
-            if self.current().type in ('IDENT', 'NUMBER'):
-                provided_objects.append(('object', self.current().value))
-                self.advance()
-                if self.current().type == 'COMMA':
-                    self.advance()
-            elif self.current().type == 'ANGLE':
-                provided_objects.append(('object', self.current().value))
+            if self.current().type in ('IDENT', 'NUMBER', 'ANGLE'):
+                raw_args.append(self.current().value)
                 self.advance()
                 if self.current().type == 'COMMA':
                     self.advance()
             else:
                 break
-
-        if len(provided_objects) != len(axiom.let_objects) + len(axiom.let_numvars):
-            print(f"Error: Axiom '{axiom.name}' expects {len(axiom.let_objects)} object(s) "
-                  f"and {len(axiom.let_numvars)} number(s), got {len(provided_objects)}")
-            sys.exit(1)
-
-        # First bind object args, then numvar args (in declaration order)
-        obj_provided = provided_objects[:len(axiom.let_objects)]
-        num_provided = provided_objects[len(axiom.let_objects):]
-
-        for axiom_obj, (_, provided_obj) in zip(axiom.let_objects, obj_provided):
-            for axiom_char, provided_char in zip(axiom_obj, provided_obj):
-                bindings[axiom_char] = provided_char
-
-        for numvar, (_, provided_num) in zip(axiom.let_numvars, num_provided):
-            bindings[numvar] = provided_num  # e.g. bindings['x_1'] = '45' or 'angABC'
-
-        return bindings
+        return raw_args
 
     def parse_statement(self) -> List[Statement]:
         statements = []
@@ -222,8 +211,7 @@ class Parser:
             self.advance()
             self.advance()
 
-            axiom = self.axioms[axiom_name]
-            bindings = self.parse_axiom_bindings(axiom)
+            raw_args = self.parse_axiom_bindings()
 
             if self.current().type != 'RBRACE':
                 print(f"Syntax Error: Expected '}}' after axiom bindings")
@@ -233,8 +221,7 @@ class Parser:
             if self.current().type == 'ARROW':
                 self.advance()
                 conclusion = self.parse_statement()
-                statements.append(Statement('axiom_application', [axiom_name], value=str(bindings), line=line))
-                print(conclusion)
+                statements.append(Statement('axiom_application', [axiom_name], value=str(raw_args), line=line))
                 statements.extend(conclusion)
 
             return statements
@@ -249,9 +236,9 @@ class Parser:
                 statements.append(Statement('let_numvar', [numvar], line=line))
                 return statements
 
-            obj = self.current().value if self.current().type == 'IDENT' else None
+            obj_type = self.current().type
+            obj = self.current().value if obj_type in ('IDENT', 'ANGLE') else None
             self.advance()
-            line_val = self.current().line
 
             statements.append(Statement('let', [obj], line=line))
 
@@ -259,20 +246,17 @@ class Parser:
                 self.advance()
                 points = list(obj)
                 if len(points) != 3:
-                    print(
-                        f"{line}| {line_val}\nSyntax Error on line {line}: 'iso' requires a 3-point plane, given: {''.join(points)}")
+                    print(self._err(line, f"Syntax Error: 'iso' requires a 3-point plane, given: {''.join(points)}"))
                     sys.exit(1)
                 base = points[0] + points[1]
                 if self.current().type == 'BASE':
                     self.advance()
                     base = self.current().value if self.current().type == 'IDENT' else base
                     if len(base) != 2:
-                        print(
-                            f"{line}| {line_val}\nSyntax Error on line {line}: 'base' requires a 2-letter edge name (given {base})")
+                        print(self._err(line, f"Syntax Error: 'base' requires a 2-letter edge name (given {base})"))
                         sys.exit(1)
                     if not (base[0] in points and base[1] in points):
-                        print(
-                            f"{line}| {line_val}\nSyntax Error on line {line}: 'base' must use points from triangle (given: {base} to {points})")
+                        print(self._err(line, f"Syntax Error: 'base' must use points from triangle (given: {base} to {points})"))
                         sys.exit(1)
                     self.advance()
                 if base == points[0] + points[1]:
@@ -284,12 +268,50 @@ class Parser:
                 for i in range(len(equal_sides) - 1):
                     statements.append(Statement('equality', [equal_sides[i], equal_sides[i + 1]], line=line))
 
+            if self.current().type == 'MEDIAN':
+                self.advance()
+                point = list(obj)
+                if obj_type != 'IDENT':
+                    print(self._err(line, f"Syntax Error: 'median' requires an identifier, given: {obj_type}"))
+                    sys.exit(1)
+                if len(point) != 1:
+                    print(self._err(line, f"Syntax Error: 'median' requires a single point, given: {''.join(point)}"))
+                    sys.exit(1)
+                if self.current().type != 'IDENT':
+                    print(self._err(line, f"Syntax Error: identifier expected after 'median', given {self.current().type}"))
+                    sys.exit(1)
+                base = self.current().value
+                if len(base) != 2:
+                    print(self._err(line, f"Syntax Error: 'median' is defined by a 2-letter edge name, given {base}"))
+                    sys.exit(1)
+
+                equality_pair = [base[0] + point[0], base[1] + point[0]]
+                statements.append(Statement('equality', equality_pair, line=line))
+
+            if self.current().type == 'BISECTOR':
+                self.advance()
+                point = list(obj)
+                if obj_type != 'IDENT':
+                    print(self._err(line, f"Syntax Error: 'bisector' requires an identifier, given: {obj_type}"))
+                    sys.exit(1)
+                if len(point) != 1:
+                    print(self._err(line, f"Syntax Error: 'bisector' requires a single point, given: {''.join(point)}"))
+                    sys.exit(1)
+
+                base = self.current().value
+                if self.current().type != 'ANGLE' or len(base) != 6:
+                    print(self._err(line, f"Syntax Error: valid angle expected after 'bisector' (given {base})"))
+                    sys.exit(1)
+                base = base[3:]
+
+                equality_pair = ['ang'+base[0]+base[1]+point[0], 'ang'+point[0]+base[1]+base[2]]
+                statements.append(Statement('equality', equality_pair, line=line))
+
             if self.current().type == 'SQUARE':
                 self.advance()
                 points = list(obj)
                 if len(points) != 4:
-                    print(
-                        f"{line}| {line_val}\nSyntax Error on line {line}: 'square' requires a 4-point plane, given: {''.join(points)}")
+                    print(self._err(line, f"Syntax Error: 'square' requires a 4-point plane, given: {''.join(points)}"))
                     sys.exit(1)
                 for i in range(len(points) - 2):
                     statements.append(Statement('equality', [points[i] + points[i + 1],
@@ -301,16 +323,45 @@ class Parser:
                 for i in range(len(points) - 1):
                     statements.append(Statement('equality', [points[i] + points[i + 1],
                                                              points[i + 1] + points[(i + 2) % len(points)]], line=line))
-
-        elif self.current().type in ('IDENT', 'NUMVAR'):
+        elif self.current().type == 'NUMVAR':
             left = self.current().value
-            left_type = self.current().type
             self.advance()
-            left_operands = self.parse_sum_operands(left, left_type)
+            left_operands = self.parse_sum_operands(left, ['NUMBER', 'IDENT', 'ANGLE', 'NUMVAR'])
 
             if self.current().type == 'EQUALS':
                 self.advance()
-                rhs = self.parse_rhs(left_type, line, line_val)
+                rhs = self.parse_rhs('NUMVAR', line)
+                if rhs[0] == 'single':
+                    _, right, right_type = rhs
+                    if right_type in ('NUMBER', 'NUMVAR'):
+                        if len(left_operands) == 1:
+                            statements.append(Statement('assignment', [left, right], line=line))
+                        else:
+                            statements.append(Statement('sum_assignment', [left_operands, right], line=line))
+                    elif right_type in ('IDENT', 'ANGLE'):
+                        if len(left_operands) == 1:
+                            statements.append(Statement('equality', [left, right], line=line))
+                        else:
+                            statements.append(Statement('sum_equality', [left_operands, [('+', right)]], line=line))
+                else:
+                    _, right_operands = rhs
+                    statements.append(Statement('sum_equality', [left_operands, right_operands], line=line))
+
+            if self.current().type == 'INEQUALS':
+                self.advance()
+                right = self.current().value
+                self.advance()
+                statements.append(Statement('inequality', [left, right], line=line))
+
+        elif self.current().type == 'IDENT':
+            left = self.current().value
+            left_type = self.current().type
+            self.advance()
+            left_operands = self.parse_sum_operands(left, (left_type,))
+
+            if self.current().type == 'EQUALS':
+                self.advance()
+                rhs = self.parse_rhs(left_type, line)
                 if rhs[0] == 'single':
                     _, right, right_type = rhs
                     if right_type in ('NUMBER', 'NUMVAR'):
@@ -330,22 +381,21 @@ class Parser:
             if self.current().type == 'INEQUALS':
                 self.advance()
                 if self.current().type not in ('IDENT', 'NUMVAR'):
-                    print(f"{line_val}\nSyntax Error on line {line}: Expected identifier after '!='")
+                    print(f"{line_val}\nSyntax Error on line {line}: Expected identifier or numvar after '!='")
                     sys.exit(1)
                 right = self.current().value
                 self.advance()
                 statements.append(Statement('inequality', [left, right], line=line))
 
-
-        elif self.current().type in ('ANGLE', 'NUMVAR'):
+        elif self.current().type == 'ANGLE':
             left_angle = self.current().value
             left_type = self.current().type
             self.advance()
-            left_operands = self.parse_sum_operands(left_angle, left_type)
+            left_operands = self.parse_sum_operands(left_angle, (left_type,))
 
             if self.current().type == 'EQUALS':
                 self.advance()
-                rhs = self.parse_rhs(left_type, line, line_val)
+                rhs = self.parse_rhs(left_type, line)
                 if rhs[0] == 'single':
                     _, right, right_type = rhs
                     if right_type in ('NUMBER', 'NUMVAR'):
@@ -363,21 +413,38 @@ class Parser:
                     statements.append(Statement('sum_equality', [left_operands, right_operands], line=line))
             if self.current().type == 'INEQUALS':
                 self.advance()
-                if self.current().type not in ('IDENT', 'NUMVAR'):
-                    print(f"{line_val}\nSyntax Error on line {line}: Expected identifier after '!='")
+                if self.current().type not in ('ANGLE', 'NUMVAR'):
+                    print(f"{line_val}\nSyntax Error on line {line}: Expected angle or numvar after '!='")
                     sys.exit(1)
                 right = self.current().value
                 self.advance()
                 statements.append(Statement('inequality', [left_angle, right], line=line))
+
+        elif self.current().type == 'NUMBER':
+            left = self.current().value
+            self.advance()
+            left_operands = self.parse_sum_operands(left, ('NUMBER','ANGLE', 'IDENT'))
+
+            if self.current().type == 'EQUALS':
+                self.advance()
+                rhs = self.parse_rhs(('NUMBER','ANGLE', 'IDENT'), line)
+                if rhs[0] == 'single':
+                    _, right, right_type = rhs
+                    if right_type in ('NUMBER', 'NUMVAR'):
+                        statements.append(Statement('sum_assignment', [left_operands, right], line=line))
+                    elif right_type in ('IDENT', 'ANGLE'):
+                        statements.append(Statement('sum_equality', [left_operands, [('+', right)]], line=line))
+                else:
+                    _, right_operands = rhs
+                    statements.append(Statement('sum_equality', [left_operands, right_operands], line=line))
+
         else:
             self.advance()
         return statements
 
-    def parse_rhs(self, allowed_type: str, line: int, line_val: str) -> tuple:
-        # Allow NUMVAR anywhere a NUMBER or object can appear on the rhs
-        if self.current().type not in (allowed_type, 'NUMBER', 'NUMVAR'):
-            print(
-                f"{line}| {line_val}\nSyntax Error on line {line}: Unexpected token '{self.current().value}' after '='")
+    def parse_rhs(self, allowed_types: Sequence[str], line: int) -> tuple:
+        if self.current().type not in ('NUMBER', 'NUMVAR') and self.current().type not in allowed_types:
+            print(self._err(line, f"Syntax Error: Unexpected token '{self.current().value}' after '='"))
             sys.exit(1)
 
         first_val = self.current().value
@@ -389,16 +456,15 @@ class Parser:
             while self.current().type in ('PLUS', 'MINUS'):
                 sign = '+' if self.current().type == 'PLUS' else '-'
                 self.advance()
-                if self.current().type not in (allowed_type, 'NUMBER', 'NUMVAR'):
-                    print(
-                        f"{line}| {line_val}\nSyntax Error on line {line}: Expected {allowed_type}, number, or numvar after '+'/'-'")
+                if self.current().type not in allowed_types and self.current().type not in ('NUMBER', 'NUMVAR'):
+                    print(self._err(line, f"Syntax Error: Expected {allowed_types}, number, or numvar after '+'/'-'"))
                     sys.exit(1)
                 operands.append((sign, self.current().value))
                 self.advance()
             return ('sum', operands)
 
         if first_type not in ('NUMBER', 'NUMVAR') and self.current().type in ('PLUS', 'MINUS'):
-            rhs_operands = self.parse_sum_operands(first_val, allowed_type)
+            rhs_operands = self.parse_sum_operands(first_val, allowed_types)
             return ('sum', rhs_operands)
 
         return ('single', first_val, first_type)

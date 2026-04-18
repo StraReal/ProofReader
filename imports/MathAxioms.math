@@ -1,0 +1,8 @@
+axiom SideSwitching:
+    Given:
+        let AB
+        let CD
+        let EF
+        AB + CD = EF
+    Then:
+        AB = EF - CD

@@ -36,3 +36,10 @@ axiom AngleSum:
         let ABC
     Then:
         angABC + angBCA + angCAB = 180
+
+axiom SegmentAddition:
+    Given:
+        let AM
+        let BM
+    Then:
+        AM + BM = AB

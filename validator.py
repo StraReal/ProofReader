@@ -13,23 +13,27 @@ class Validator:
         self.import_map: dict = import_map
         self.last_axiom_failed: bool = False
 
-    def validate(self, axioms: Dict[str, AxiomDefinition], theorems: Dict[str, TheoremDefinition],
-                 hypothesis: Optional[HypothesisBlock], proofs: List[Statement]):
+    def validate(self, axioms: Dict[str, AxiomDefinition],
+                 hypothesis: Optional[HypothesisBlock], ordered: List[Statement], proofs: List[Statement]) -> None:
         self.axioms = axioms
-
-        for theorem in theorems.values():
-            self.validate_theorem(theorem)
 
         if hypothesis:
             for stmt in hypothesis.statements:
                 self.process_statement(stmt, is_hypothesis=True)
             self.propagate_transitivity()
-            print(f"DEBUG: known_equalities = {self.known_equalities}")
-            print(f"DEBUG: known_inequalities = {self.known_inequalities}")
-            print(f"DEBUG: class_values = {self.class_values}")
+            print("DEBUG: known_equalities: ", self.known_equalities)
+
+        for kind, item in ordered:
+            if kind == 'axiom':
+                pass
+            elif kind == 'theorem':
+                self.validate_theorem(item)
+            elif kind == 'proof':
+                self.process_statement(item, is_hypothesis=False)
 
         for stmt in proofs:
             self.process_statement(stmt, is_hypothesis=False)
+
 
     def validate_theorem(self, theorem: TheoremDefinition):
         child = Validator(self.import_map)
@@ -48,7 +52,7 @@ class Validator:
                 self.errors.append(f"  {err}")
             return
 
-        # Verify every 'then' conclusion is established by the proof
+        # verify then is valid
         for then_stmt in theorem.then:
 
             if then_stmt.type == 'equality':
@@ -130,7 +134,7 @@ class Validator:
                         f"Theorem '{theorem.name}': conclusion '{left_canon} = {right_canon}' was not proven")
                     return
 
-        # All conclusions verified — register as reusable axiom
+        # once verified, it's used exactly like an axiom
         self.axioms[theorem.name] = AxiomDefinition(
             theorem.name,
             theorem.given,
@@ -154,6 +158,10 @@ class Validator:
             else:
                 return ''.join(sorted(unnorm_object))
 
+    def _err(self, line, msg):
+        file, lineno = self.get_infile_line(line)
+        return f"{file} | Line {lineno}: {msg}"
+
     def get_infile_line(self, line_num):
         if line_num in self.import_map:
             filename, original_line = self.import_map[line_num]
@@ -171,8 +179,6 @@ class Validator:
             except ValueError:
                 pass
             norm_name = self.normalize_object(name)
-            if norm_name.startswith('ang'):
-                norm_name = norm_name[3:]
             normalised.append((sign, norm_name))
         normalised.sort()
         return tuple(normalised)
@@ -287,17 +293,18 @@ class Validator:
         - A normalized object string (for comparison)
         - None (undefined)
         """
-        # Case 1: Single numeric value
+        # man i hated doing this
+        # case 1: single numeric value
         if isinstance(obj, (int, float)):
             return obj
 
+        # case 2: object (angle/ident)
         if isinstance(obj, str):
             try:
                 return float(obj)
             except ValueError:
                 pass
 
-            # It's an object reference
             norm = self.normalize_object(obj)
             if obj.startswith('ang'):
                 norm = norm[3:]
@@ -306,7 +313,7 @@ class Validator:
                 return None
             return norm
 
-        # Case 2: Sum (list of (sign, operand) tuples)
+        # Case 3: sum (list of (sign, operand) tuples)
         if isinstance(obj, (list, tuple)):
             return self.evaluate_sum(obj)
 
@@ -384,19 +391,17 @@ class Validator:
                            left_ineq_class == right_ineq_class)
 
         if inequality:
-            # For !=, they must be in different equality classes
             if same_eq_class:
-                return 2  # False (they're equal)
+                return 2
             if same_ineq_class:
-                return 0  # Proven (they're unequal)
-            return 1  # Unproven
+                return 0
+            return 1
         else:
-            # For =, they must be in same equality class
             if same_eq_class:
-                return 0  # Proven
+                return 0
             if same_ineq_class:
-                return 2  # False (they're unequal)
-            return 1  # Unproven
+                return 2
+            return 1
 
     def _check_numeric_equality(self, obj, expected_value):
         """Check if an object equals an expected numeric value."""
@@ -428,10 +433,6 @@ class Validator:
         obj_class = next((eq for eq in self.known_equalities if norm in eq), None)
         return self.class_values.get(obj_class)
 
-    def _err(self, line, msg):
-        file, lineno = self.get_infile_line(line)
-        return f"{file} | Line {lineno}: {msg}"
-
     def substitute_variables(self, template: str, bindings: Dict[str, str]) -> str:
         """
         Replace variables in template with concrete values.
@@ -452,30 +453,25 @@ class Validator:
                 continue
             except ValueError:
                 pass
-            norm = self.normalize_object(name) if not name.startswith('ang') else name
+            norm = self.normalize_object(name)[3:] if name.startswith('ang') else self.normalize_object(name)
             if not all(p in self.defined_objects for p in norm):
                 self.errors.append(self._err(line, f"Object '{norm}' not defined"))
                 return False
         return True
 
     def _substitute_numeric_values(self, canon):
-        """
-        Walk a canonical signed-sum and replace any named segment whose
-        equality class has a known numeric value with that number (as a string).
-        Bare numeric strings are passed through unchanged.
-        """
         result = []
         for sign, name in canon:
             try:
-                float(name)  # already a number literal
+                float(name)
                 result.append((sign, name))
                 continue
-            except ValueError:
+            except (ValueError, TypeError):
                 pass
-            norm = self.normalize_object(name) if not name.startswith('ang') else name
+            norm = self.normalize_object(name)
             cls = next((eq for eq in self.known_equalities if norm in eq), None)
             val = self.class_values.get(cls) if cls else None
-            result.append((sign, str(val) if val is not None else name))
+            result.append((sign, str(val) if val is not None else norm))
         return result
 
     def _split_numeric_symbolic(self, canon):
@@ -553,6 +549,7 @@ class Validator:
 
     def _process_sum_equality(self, stmt, is_hypothesis):
         """AB + CD = EF - GH"""
+        print(f"DEBUG sum_equality: {stmt.objects} is_hypothesis={is_hypothesis}")
         left_canon = self.normalize_signed_sum(stmt.objects[0])
         right_canon = self.normalize_signed_sum(stmt.objects[1])
 
@@ -571,38 +568,46 @@ class Validator:
         combined_sym = tuple(left_sym) + tuple(flipped_right)
 
         if not combined_sym:
-            # Both sides fully numeric
             ok = (net_numeric == 0.0)
             if not ok:
                 self.errors.append(self._err(stmt.line, f"Numeric conflict: sides differ by {net_numeric}"))
             return
+
+        if combined_sym[0][0] == '-':
+            combined_sym = tuple(sorted(('+' if s == '-' else '-', n) for s, n in combined_sym))
+            net_numeric = -net_numeric
 
         left_key = tuple(left_sym)
         right_key = tuple(right_sym)
 
         if is_hypothesis:
             if not left_sym and right_sym:
-                # e.g.  50 = EF so store EF = 50
+                # 50 = EF so bring number to right EF = 50
                 self._store_sum(right_key, -net_numeric)
             elif left_sym and not right_sym:
                 self._store_sum(left_key, net_numeric)
             else:
-                # Both symbolic so record as equality class
+                # no numbers
                 self._store_sum_symbolic(left_key, right_key)
         else:
             cls = next((eq for eq in self.known_equalities if combined_sym in eq), None)
             val = self.class_values.get(cls)
             if val is not None and val == net_numeric:
                 return
-            # Also allow same-class symbolic equality (net_numeric == 0)
-            if net_numeric == 0.0:
-                left_cls = next((eq for eq in self.known_equalities if left_key in eq), None)
-                right_cls = next((eq for eq in self.known_equalities if right_key in eq), None)
-                if left_cls is not None and left_cls == right_cls:
+            elif val is not None and val != net_numeric:
+                self.errors.append(self._err(stmt.line,
+                                             f"'{left_canon} = {right_canon}' is false (expected {val}, got {net_numeric})"))
+            elif net_numeric == 0.0:
+                lc = next((eq for eq in self.known_equalities if tuple(left_sym) in eq), None)
+                rc = next((eq for eq in self.known_equalities if tuple(right_sym) in eq), None)
+                if lc is not None and lc == rc:
                     return
-            self.errors.append(self._err(stmt.line, f"'{left_canon} = {right_canon}' is unproven"))
+                self.errors.append(self._err(stmt.line, f"'{left_canon} = {right_canon}' is unproven"))
+            else:
+                self.errors.append(self._err(stmt.line, f"'{left_canon} = {right_canon}' is unproven"))
 
     def process_statement(self, stmt: Statement, is_hypothesis: bool):
+        print(f"DEBUG process_statement: type={stmt.type} objects={stmt.objects} is_hypothesis={is_hypothesis}")
         if stmt.type == 'axiom_application':
             self.last_axiom_failed = not self.apply_axiom(stmt)
             return
@@ -617,10 +622,10 @@ class Validator:
             right = self.normalize_object(stmt.objects[1])
             result = self.get_equality_value(left, right)
             if result == 11:
-                self.errors.append(self._err(stmt.line, f"Object '{left}' not defined"));
+                self.errors.append(self._err(stmt.line, f"Object '{left}' not defined"))
                 return
             if result == 12:
-                self.errors.append(self._err(stmt.line, f"Object '{right}' not defined"));
+                self.errors.append(self._err(stmt.line, f"Object '{right}' not defined"))
                 return
             pair = frozenset([left, right])
             if is_hypothesis:
@@ -635,10 +640,10 @@ class Validator:
             right = self.normalize_object(stmt.objects[1])
             result = self.get_equality_value(left, right, inequality=True)
             if result == 11:
-                self.errors.append(self._err(stmt.line, f"Object '{left}' not defined"));
+                self.errors.append(self._err(stmt.line, f"Object '{left}' not defined"))
                 return
             if result == 12:
-                self.errors.append(self._err(stmt.line, f"Object '{right}' not defined"));
+                self.errors.append(self._err(stmt.line, f"Object '{right}' not defined"))
                 return
             pair = frozenset([left, right])
             if is_hypothesis:
@@ -651,9 +656,9 @@ class Validator:
         if stmt.type == 'assignment':
             left = self.normalize_object(stmt.objects[0])
             right = stmt.objects[1]
-            result = self.get_equality_value(left, float(right), numeric_value=True)
+            result = self.get_equality_value(left, float(right))
             if result == 11:
-                self.errors.append(self._err(stmt.line, f"Object '{left}' not defined"));
+                self.errors.append(self._err(stmt.line, f"Object '{left}' not defined"))
                 return
             left_class = next((eq for eq in self.known_equalities if left in eq), None)
             if is_hypothesis:
@@ -676,7 +681,8 @@ class Validator:
 
     def apply_axiom(self, stmt: Statement):
         axiom_name = stmt.objects[0]
-        bindings = eval(stmt.value)
+        raw_args   = eval(stmt.value)
+        raw_args = [self.normalize_object(a) for a in raw_args]
         line = stmt.line
 
         if axiom_name not in self.axioms:
@@ -685,7 +691,20 @@ class Validator:
 
         axiom = self.axioms[axiom_name]
 
-        # ── 1. Resolve numvar bindings to concrete floats ────────────────────────
+        if len(raw_args) != len(axiom.let_objects) + len(axiom.let_numvars):
+            self.errors.append(self._err(line,
+                                         f"Axiom '{axiom_name}' expects {len(axiom.let_objects)} object(s) "
+                                         f"and {len(axiom.let_numvars)} numvar(s), got {len(raw_args)}"))
+            return False
+
+        bindings = {}
+        for axiom_obj, provided_obj in zip(axiom.let_objects, raw_args[:len(axiom.let_objects)]):
+            for axiom_char, provided_char in zip(axiom_obj, provided_obj):
+                bindings[axiom_char] = provided_char
+
+        for numvar, provided_num in zip(axiom.let_numvars, raw_args[len(axiom.let_objects):]):
+            bindings[numvar] = provided_num
+
         for numvar in axiom.let_numvars:
             raw = bindings.get(numvar)
             if raw is None:
@@ -697,7 +716,6 @@ class Validator:
                 return False
             bindings[numvar] = str(int(resolved)) if resolved == int(resolved) else str(resolved)
 
-        # ── 2. Sanity-check: every point referenced in the axiom is declared ─────
         declared_points = {p for obj in axiom.let_objects for p in obj}
         for s in list(axiom.given.statements) + axiom.then:
             if s.type in ('assignment', 'sum_assignment', 'sum_equality', 'let_numvar'):
@@ -713,13 +731,11 @@ class Validator:
                         self.errors.append(f"Axiom '{axiom_name}': point '{point}' in '{raw}' not declared")
                         return False
 
-        # ── helper: apply bindings then substitute known numeric values ──────────
         def concretize(operands):
             """(sign, name) list → substitute bindings → substitute numeric values."""
             with_bindings = [(s, self.substitute_variables(n, bindings)) for s, n in operands]
             return self._substitute_numeric_values(with_bindings)
 
-        # ── 3. Check hypotheses (given) ──────────────────────────────────────────
         for hyp in axiom.given.statements:
 
             if hyp.type == 'let':
@@ -809,9 +825,7 @@ class Validator:
                         self.errors.append(self._err(line, f"Axiom '{axiom_name}': condition not satisfied"))
                         return False
 
-        # ── 4. Apply theses (then) ───────────────────────────────────────────────
         for thesis in axiom.then:
-
             if thesis.type == 'equality':
                 left = self.normalize_object(self.substitute_variables(thesis.objects[0], bindings))
                 right = self.normalize_object(self.substitute_variables(thesis.objects[1], bindings))
@@ -846,15 +860,13 @@ class Validator:
                 right_key = tuple(right_sym)
 
                 if not left_sym and not right_sym:
-                    pass  # both numeric, nothing to store
+                    pass
                 elif not right_sym:
                     self._store_sum(left_key, net_numeric)
                 elif not left_sym:
                     self._store_sum(right_key, -net_numeric)
                 else:
-                    # Both still symbolic — merge equality classes
                     self._store_sum_symbolic(left_key, right_key)
-                    # If net_numeric != 0, one side is offset — store on combined key
                     if net_numeric != 0.0:
                         flipped = [('+' if s == '-' else '-', n) for s, n in right_sym]
                         combined_sym = left_key + tuple(flipped)
