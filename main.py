@@ -23,12 +23,6 @@ simple_keywords = {
     'print': 'PRINT',
 }
 
-def is_one(number):
-    if number == 1:
-        return True
-    else:
-        return is_one(number - 1)
-
 #lexer
 def tokenize(code: str, import_map: dict) -> List[Token]:
     tokens = []
