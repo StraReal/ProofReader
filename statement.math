@@ -1,30 +1,13 @@
 import BasicAxioms
 
-#theorem AngleSideAngleCongruence: #didnt prove this correctly yet
-#    Given:
-#        let ABC
-#        let DEF
-#        angABC = angDEF
-#        BC = EF
-#        angBCA = angEFD
-#    Then:
-#        ABC = DEF
-#    Proof:
-#        AngleSum{ABC} => angABC + angBCA + angCAB = 180
-#        angABC + angBCA = 180-angCAB
-
-
 Hypothesis:
     let ABC
-    let GHI
-    let D
-    let M median AB
-    let x_1 = 80
-    angABC - angABD = 70
+    let DEF
+    angABC = angDEF
+    AC contains B
+    BC = EF
+    angBCA = angEFD
 
 Proof:
-    x_1 = angABC - angABD
-    SegmentAddition{AM MB} => AM+MB = AB
-    AM + MB = AB
-    AngleSum{ABC} => angABC + angBCA + angCAB = 180
-    #AngleSideAngleCongruence{ABC GHI} => ABC = GHI
+    SegmentAddition{AB BC} => AB+BC = AC
+    AngleSideAngleCongruence{ABC DEF} => ABC = DEF

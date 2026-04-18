@@ -44,3 +44,14 @@ def load_file(filename: str) -> str:
     except FileNotFoundError:
         print(f"Error: File '{filename}' not found")
         return ""
+
+def print_error(line, msg, import_map):
+    file, lineno = get_infile_line(line, import_map)
+    print(f"{file} | Line {lineno}: {msg}")
+
+def get_infile_line(line_num, import_map):
+    if line_num in import_map:
+        filename, original_line = import_map[line_num]
+        return (filename, original_line)
+    else:
+        return (None, line_num)

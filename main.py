@@ -9,8 +9,28 @@ class AxiomApplication:
     bindings: Dict[str, str]  # {'ABC': 'ABC', 'DEF': 'GHI'}
     line: int
 
+simple_keywords = {
+    'let': 'LET',
+    'iso': 'ISO',
+    'in': 'IN',
+    'median': 'MEDIAN',
+    'bisector': 'BISECTOR',
+    'square': 'SQUARE',
+    'rectangle': 'RECTANGLE',
+    'equilateral': 'EQUILATERAL',
+    'import': 'IMPORT',
+    'contains': 'CONTAINS',
+    'print': 'PRINT',
+}
+
+def is_one(number):
+    if number == 1:
+        return True
+    else:
+        return is_one(number - 1)
+
 #lexer
-def tokenize(code: str) -> List[Token]:
+def tokenize(code: str, import_map: dict) -> List[Token]:
     tokens = []
     lines = code.split('\n')
 
@@ -20,7 +40,6 @@ def tokenize(code: str) -> List[Token]:
             if line[pos].isspace():
                 pos += 1
                 continue
-
             # Hypothesis keyword
             if line[pos:].startswith('Hypothesis'):
                 tokens.append(Token('HYPOTHESIS', 'Hypothesis', line_num, line))
@@ -30,10 +49,10 @@ def tokenize(code: str) -> List[Token]:
             elif line[pos:].startswith('Proof'):
                 tokens.append(Token('PROOF', 'Proof', line_num, line))
                 pos += 5
-            elif line[pos:].startswith('axiom'):
+            elif line[pos:].startswith('axiom '):
                 tokens.append(Token('AXIOM', 'axiom', line_num, line))
                 pos += 5
-            elif line[pos:].startswith('theorem'):
+            elif line[pos:].startswith('theorem '):
                 tokens.append(Token('THEOREM', 'theorem', line_num, line))
                 pos += 7
             elif line[pos:].startswith('Given'):
@@ -44,40 +63,35 @@ def tokenize(code: str) -> List[Token]:
                 tokens.append(Token('THEN', 'Then', line_num, line))
                 pos += 4
 
-            elif line[pos:].startswith('let'):
-                tokens.append(Token('LET', 'let', line_num, line))
-                pos += 3
+            matched = False
+            for keyword, token_type in simple_keywords.items():
+                if line[pos:].startswith(keyword):
+                    end_pos = pos + len(keyword)
+                    if end_pos >= len(line):
+                        tokens.append(Token(token_type, keyword, line_num, line))
+                        pos += len(keyword)
+                        matched = True
+                        break
+                    if not line[end_pos].isspace():
+                        continue
+                    tokens.append(Token(token_type, keyword, line_num, line))
+                    pos += len(keyword)
+                    matched = True
+                    break
 
-            elif line[pos:].startswith('iso'):
-                tokens.append(Token('ISO', 'iso', line_num, line))
-                pos += 3
-            elif line[pos:].startswith('median'):
-                tokens.append(Token('MEDIAN', 'median', line_num, line))
-                pos += 6
-            elif line[pos:].startswith('bisector'):
-                tokens.append(Token('BISECTOR', 'bisector', line_num, line))
-                pos += 8
-            elif line[pos:].startswith('square'):
-                tokens.append(Token('SQUARE', 'square', line_num, line))
-                pos += 6
-            elif line[pos:].startswith('equilateral'):
-                tokens.append(Token('EQUILATERAL', 'equilateral', line_num, line))
-                pos += 11
-            elif line[pos:].startswith('base'):
-                tokens.append(Token('BASE', 'base', line_num, line))
-                pos += 4
-            # for importing axioms and theorems
-            elif line[pos:].startswith('import'):
-                tokens.append(Token('IMPORT', 'import', line_num, line))
-                pos += 6
+            if matched:
+                continue
 
             # Angle prefix
-            elif line[pos:].startswith('ang'):
+            if line[pos:].startswith('ang'):
                 pos += 3
                 word = ''
                 while pos < len(line) and line[pos].isalnum():
                     word += line[pos]
                     pos += 1
+                if not (word.isupper() and len(word) == 3):
+                    print_error(line_num, f"{word} is not a valid angle", import_map)
+                    sys.exit(1)
                 tokens.append(Token('ANGLE', f'ang{word}', line_num, line))
                 continue
 
@@ -92,6 +106,23 @@ def tokenize(code: str) -> List[Token]:
                     tokens.append(Token('NUMVAR', word, line_num, line))
                 else:
                     tokens.append(Token('IDENT', word, line_num, line))
+                continue
+
+            elif line[pos] == '"':
+                string = '"'
+                closed = False
+                pos += 1
+                while pos < len(line):
+                    string += line[pos]
+                    if line[pos] == '"':
+                        closed = True
+                        break
+                    pos += 1
+                if not closed:
+                    print_error(line_num, f"Syntax Error: Unclosed quotes.",import_map)
+                    sys.exit(1)
+                tokens.append(Token('STRING', string, line_num, line))
+                pos += 1
                 continue
 
             elif line[pos].isdigit():
@@ -126,6 +157,12 @@ def tokenize(code: str) -> List[Token]:
             elif line[pos] == '-':
                 tokens.append(Token('MINUS', '-', line_num, line))  # was '+'
                 pos += 1
+            elif line[pos] == '<':
+                tokens.append(Token('LESSTHAN', '-', line_num, line))  # was '+'
+                pos += 1
+            elif line[pos] == '>':
+                tokens.append(Token('GREATER', '-', line_num, line))  # was '+'
+                pos += 1
             elif line[pos] == '=':
                 tokens.append(Token('EQUALS', '=', line_num, line))
                 pos += 1
@@ -153,8 +190,8 @@ file_tracker = [(filename, i + 1) for i in range(len(code.split('\n')))]
 import_map = {i + 1: file_tracker[i] for i in range(len(file_tracker))}
 
 while True:
-    tokens = tokenize(code)
     import_map = {i + 1: file_tracker[i] for i in range(len(file_tracker))}
+    tokens = tokenize(code, import_map)
     parser = Parser(tokens, import_map)
     axioms, theorems, hypothesis, proofs, to_import, ordered = parser.parse()
 
@@ -173,7 +210,7 @@ while True:
 
         for i, line in enumerate(imported_lines):
             lines.insert(import_line - 1 + i, line)
-            file_tracker.insert(import_line - 1 + i, (to_import[0], i + 1))
+            file_tracker.insert(import_line - 1 + i, (f"{to_import[0]}.math", i + 1))
 
         code = '\n'.join(lines)
 

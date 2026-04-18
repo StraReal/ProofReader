@@ -39,7 +39,8 @@ axiom AngleSum:
 
 axiom SegmentAddition:
     Given:
-        let AM
+        let MA
         let BM
+        AB contains M
     Then:
         AM + BM = AB
