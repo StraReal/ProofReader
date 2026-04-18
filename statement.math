@@ -1,19 +1,18 @@
-#import BasicAxioms
+import BasicAxioms
 
-axiom SupplementaryAngles:
+theorem WrongTheorem:
     Given:
         let ABC
-        let ABD
-        let x_1
-        AB + AD = x_1
     Then:
-        AB = x_1 - AD
+        angABC+angBCA+angCAB=180
+    Proof:
+        AngleSum{ABC} => angABC + angBCA + angCAB = 180
 
 Hypothesis:
     let ABC
     let D
     AB != BD
-    AB + AD = 70
+    angABC - angABD = 70
 
 Proof:
-    SupplementaryAngles{ABC ABD 70} => AB = 70 - AD
+    AngleSum{ABC} => angABC + angBCA + angCAB = 180
