@@ -19,11 +19,12 @@ Hypothesis:
     let GHI
     let D
     let M median AB
-    AB != BD
+    let x_1 = 80
     angABC - angABD = 70
 
 Proof:
+    x_1 = angABC - angABD
     SegmentAddition{AM MB} => AM+MB = AB
     AM + MB = AB
     AngleSum{ABC} => angABC + angBCA + angCAB = 180
-    AngleSideAngleCongruence{ABC GHI} => ABC = GHI
+    #AngleSideAngleCongruence{ABC GHI} => ABC = GHI

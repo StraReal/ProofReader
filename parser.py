@@ -229,19 +229,45 @@ class Parser:
         elif self.current().type == 'LET':
             self.advance()
 
-            # let x_1, numeric variable declaration inside axiom/theorem
-            if self.current().type == 'NUMVAR':
-                numvar = self.current().value
-                self.advance()
-                statements.append(Statement('let_numvar', [numvar], line=line))
-                return statements
 
             obj_type = self.current().type
-            obj = self.current().value if obj_type in ('IDENT', 'ANGLE') else None
+            obj = self.current().value if obj_type in ('IDENT', 'ANGLE', 'NUMVAR') else None
             self.advance()
 
             statements.append(Statement('let', [obj], line=line))
 
+            if obj_type == 'NUMVAR':
+                left = obj
+                left_operands = self.parse_sum_operands(left, ('NUMBER', 'IDENT', 'ANGLE', 'NUMVAR'))
+
+                if self.current().type == 'EQUALS':
+                    self.advance()
+                    rhs = self.parse_rhs(('NUMVAR', 'ANGLE', 'IDENT', 'NUMBER'), line)
+                    if rhs[0] == 'single':
+                        _, right, right_type = rhs
+                        if right_type in ('NUMBER', 'NUMVAR'):
+                            if len(left_operands) == 1:
+                                print(left, right)
+                                statements.append(Statement('assignment', [left, right], line=line))
+                            else:
+                                statements.append(Statement('sum_assignment', [left_operands, right], line=line))
+                        elif right_type in ('IDENT', 'ANGLE'):
+                            if len(left_operands) == 1:
+                                statements.append(Statement('equality', [left, right], line=line))
+                            else:
+                                statements.append(Statement('sum_equality', [left_operands, [('+', right)]], line=line))
+                    else:
+                        _, right_operands = rhs
+                        statements.append(Statement('sum_equality', [left_operands, right_operands], line=line))
+
+                if self.current().type == 'INEQUALS':
+                    self.advance()
+                    right = self.current().value
+                    self.advance()
+                    statements.append(Statement('inequality', [left, right], line=line))
+
+            if self.current().type == 'EQUALS':
+                self.advance()
             if self.current().type == 'ISO':
                 self.advance()
                 points = list(obj)
@@ -323,18 +349,20 @@ class Parser:
                 for i in range(len(points) - 1):
                     statements.append(Statement('equality', [points[i] + points[i + 1],
                                                              points[i + 1] + points[(i + 2) % len(points)]], line=line))
+
         elif self.current().type == 'NUMVAR':
             left = self.current().value
             self.advance()
-            left_operands = self.parse_sum_operands(left, ['NUMBER', 'IDENT', 'ANGLE', 'NUMVAR'])
+            left_operands = self.parse_sum_operands(left, ('NUMBER', 'IDENT', 'ANGLE', 'NUMVAR'))
 
             if self.current().type == 'EQUALS':
                 self.advance()
-                rhs = self.parse_rhs('NUMVAR', line)
+                rhs = self.parse_rhs(('NUMVAR','ANGLE','IDENT','NUMBER'), line)
                 if rhs[0] == 'single':
                     _, right, right_type = rhs
                     if right_type in ('NUMBER', 'NUMVAR'):
                         if len(left_operands) == 1:
+                            print(left, right)
                             statements.append(Statement('assignment', [left, right], line=line))
                         else:
                             statements.append(Statement('sum_assignment', [left_operands, right], line=line))

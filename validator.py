@@ -22,6 +22,8 @@ class Validator:
                 self.process_statement(stmt, is_hypothesis=True)
             self.propagate_transitivity()
             print("DEBUG: known_equalities: ", self.known_equalities)
+            print("DEBUG: known_inequalities: ", self.known_inequalities)
+            print("DEBUG: class_values: ", self.class_values)
 
         for kind, item in ordered:
             if kind == 'axiom':
@@ -145,6 +147,8 @@ class Validator:
         print(f"Theorem '{theorem.name}' proven and registered.")
 
     def normalize_object(self, unnorm_object: str) -> str:
+        if re.match(r'^[xyz]_\d+$', unnorm_object):
+            return unnorm_object
         try:
             float(unnorm_object)
             return unnorm_object
@@ -453,10 +457,11 @@ class Validator:
                 continue
             except ValueError:
                 pass
-            norm = self.normalize_object(name)[3:] if name.startswith('ang') else self.normalize_object(name)
-            if not all(p in self.defined_objects for p in norm):
-                self.errors.append(self._err(line, f"Object '{norm}' not defined"))
-                return False
+            if not re.match(r'^[xyz]_\d+$', name):
+                norm = self.normalize_object(name)[3:] if name.startswith('ang') else self.normalize_object(name)
+                if not all(p in self.defined_objects for p in norm):
+                    self.errors.append(self._err(line, f"Object '{norm}' not defined"))
+                    return False
         return True
 
     def _substitute_numeric_values(self, canon):
