@@ -1,0 +1,54 @@
+program         ::= (import | axiom | theorem | hypothesis | statement)*
+
+import          ::= 'import' IDENT
+
+axiom           ::= 'axiom' IDENT ':'
+                    'Given' ':' given_block
+                    'Then' ':' then_block
+
+theorem         ::= 'theorem' IDENT ':'
+                    'Given' ':' given_block
+                    'Then' ':' then_block
+                    'Proof' ':' proof_block
+
+given_block     ::= statement*
+then_block      ::= statement*
+proof_block     ::= statement*
+
+hypothesis      ::= 'Hypothesis' ':' statement*
+
+statement       ::= let_stmt
+                  | equality_stmt
+                  | axiom_application
+                  | 'true' goal?
+                  | 'false' goal?
+                  | print_stmt
+
+goal            ::= 'is' ('true' | 'false')
+
+let_stmt        ::= 'let' IDENT modifier?
+modifier        ::= 'iso' ('base' IDENT)?
+                  | 'square'
+                  | 'equilateral'
+                  | 'median' IDENT
+                  | 'bisector' IDENT
+
+equality_stmt   ::= expr ('=' expr)+ goal?
+                  | expr '!=' expr goal?
+                  | expr '>' expr goal?
+                  | expr '<' expr goal?
+                  | expr 'in' IDENT goal?
+
+axiom_application ::= IDENT '{' arg_list '}' ('=>' statement)? goal?
+
+arg_list        ::= (IDENT | NUMBER | ANGLE) (',' (IDENT | NUMBER | ANGLE))*
+
+expr            ::= term (('+'|'-') term)*
+term            ::= IDENT | ANGLE | NUMBER | NUMVAR
+
+print_stmt      ::= 'print' expr
+
+IDENT           ::= [A-Z]+
+ANGLE           ::= 'ang' [A-Z]+
+NUMVAR          ::= [x-z] '_' [0-9]+
+NUMBER          ::= [0-9]+ ('.' [0-9]+)?

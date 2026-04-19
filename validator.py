@@ -11,9 +11,11 @@ class Validator:
         self.errors: List[str] = []
         self.class_values: Dict[frozenset, Optional[float]] = {}
         self.import_map: dict = import_map
+        self.last_let_failed: bool = False
         self.last_axiom_failed: bool = False
         self.known_greater_than = set()
         self.known_contains = set()
+        self.contradictory = False
 
     def validate(self, axioms: Dict[str, AxiomDefinition],
                  hypothesis: Optional[HypothesisBlock], ordered: List[Statement], proofs: List[Statement]) -> None:
@@ -50,98 +52,20 @@ class Validator:
         for stmt in theorem.given.statements:
             child.process_statement(stmt, is_hypothesis=True)
         child.propagate_transitivity()
-        print("DEBUG: child known_equalities: ", child.known_equalities)
 
         for stmt in theorem.proof:
             child.process_statement(stmt, is_hypothesis=False)
             child.propagate_transitivity()
-            print("DEBUG: child known_equalities: ", child.known_equalities)
-            print("DEBUG: child class_values: ", child.class_values)
+
+        # verify then is valid
+        for then_stmt in theorem.then:
+            child.process_statement(then_stmt, is_hypothesis=False)
 
         if child.errors:
             self.errors.append(f"Theorem '{theorem.name}' has a faulty proof:")
             for err in child.errors:
                 self.errors.append(f"|| {err}")
             return
-
-        # verify then is valid
-        for then_stmt in theorem.then:
-
-            if then_stmt.type == 'equality':
-                left = child.normalize_object(then_stmt.objects[0])
-                right = child.normalize_object(then_stmt.objects[1])
-                result = child.get_equality_value(left, right)
-                if result != 0:
-                    self.errors.append(self._err(then_stmt.line, f"Theorem '{theorem.name}': conclusion '{left} = {right}' was not proven")
-                        )
-                    return
-
-            elif then_stmt.type == 'inequality':
-                left = child.normalize_object(then_stmt.objects[0])
-                right = child.normalize_object(then_stmt.objects[1])
-                result = child.get_equality_value(left, right, inequality=True)
-                if result != 0:
-                    self.errors.append(self._err(then_stmt.line, f"Theorem '{theorem.name}': conclusion '{left} != {right}' was not proven"))
-                    return
-
-            elif then_stmt.type == 'assignment':
-                left = child.normalize_object(then_stmt.objects[0])
-                expected = float(then_stmt.objects[1])
-                cls = self._find_sum_class(left)
-                val = child.class_values.get(cls)
-                if val != expected:
-                    self.errors.append(self._err(then_stmt.line, f"Theorem '{theorem.name}': conclusion '{left} = {expected}' was not proven"))
-                    return
-
-            elif then_stmt.type == 'sum_assignment':
-                canon = child.normalize_signed_sum(then_stmt.objects[0])
-                expected = float(then_stmt.objects[1])
-                sub = child._substitute_numeric_values(canon)
-                numeric, sym = child._split_numeric_symbolic(sub)
-                net = expected - numeric
-
-                if not sym:
-                    if numeric != expected:
-                        self.errors.append(self._err(then_stmt.line, f"Theorem '{theorem.name}': conclusion '{canon} = {expected}' is false"))
-                        return
-                else:
-                    key = tuple(sym)
-                    cls = self._find_sum_class(key)
-                    val = child.class_values.get(cls)
-                    if val != net:
-                        self.errors.append(self._err(then_stmt.line, f"Theorem '{theorem.name}': conclusion '{canon} = {expected}' was not proven"))
-                        return
-
-            elif then_stmt.type == 'sum_equality':
-                left_canon = child.normalize_signed_sum(then_stmt.objects[0])
-                right_canon = child.normalize_signed_sum(then_stmt.objects[1])
-                left_sub = child._substitute_numeric_values(left_canon)
-                right_sub = child._substitute_numeric_values(right_canon)
-                left_num, left_sym = child._split_numeric_symbolic(left_sub)
-                right_num, right_sym = child._split_numeric_symbolic(right_sub)
-                net_numeric = right_num - left_num
-
-                flipped = [('+' if s == '-' else '-', n) for s, n in right_sym]
-                combined_sym = tuple(left_sym) + tuple(flipped)
-                combined_sym = self._canonicalize_sum_key(combined_sym)
-
-                proven = False
-                if not combined_sym:
-                    proven = (net_numeric == 0.0)
-                else:
-                    cls = self._find_sum_class(combined_sym)
-                    val = child.class_values.get(cls)
-                    if val is not None and val == net_numeric:
-                        proven = True
-                    elif net_numeric == 0.0:
-                        lc = self._find_sum_class(left_sym)
-                        rc = self._find_sum_class(right_sym)
-                        proven = (lc is not None and lc == rc)
-
-                if not proven:
-                    self.errors.append(
-                        f"Theorem '{theorem.name}': conclusion '{left_canon} = {right_canon}' was not proven")
-                    return
 
         # once verified, it's used exactly like an axiom
         self.axioms[theorem.name] = AxiomDefinition(
@@ -325,7 +249,7 @@ class Validator:
         if isinstance(val1, str) and isinstance(val2, (int, float)):
             return self._check_numeric_equality(val1, val2)
 
-        return 1  # Unproven
+        return 1
 
     def evaluate_object(self, obj):
         """
@@ -450,8 +374,6 @@ class Validator:
     def _check_numeric_equality(self, obj, expected_value):
         """Check if an object equals an expected numeric value."""
         norm = self.normalize_object(obj)
-        if obj.startswith('ang'):
-            norm = norm[3:]
 
         left_class = None
         for eq_class in self.known_equalities:
@@ -462,11 +384,11 @@ class Validator:
         actual_value = self.class_values.get(left_class)
 
         if actual_value is None:
-            return 1  # Unproven
+            return 1
         elif actual_value == expected_value:
-            return 0  # Proven
+            return 0
         else:
-            return 2  # False
+            return 2
 
     def resolve_numvar_binding(self, value: str) -> Optional[float]:
         try:
@@ -589,9 +511,10 @@ class Validator:
 
     def _process_sum_assignment(self, stmt, is_hypothesis):
         """AB + CD = 50"""
+        expected_str = "true" if stmt.goal else "false"
         canon = self.normalize_signed_sum(stmt.objects[0])
         right = float(stmt.objects[1])
-
+        make_true = is_hypothesis or (stmt.in_let and not self.last_let_failed)
         if not self._check_defined(canon, stmt.line):
             return
 
@@ -603,11 +526,11 @@ class Validator:
             ok = (numeric == right)
             if not ok:
                 self.errors.append(
-                    self._err(stmt.line, f"'{canon} = {right}' is {'false' if not is_hypothesis else 'conflicting'}"))
+                    self._err(stmt.line, f"'{canon} = {right} is {expected_str}' is {'false' if not is_hypothesis else 'conflicting'}"))
             return
 
         key = tuple(sym)
-        if is_hypothesis:
+        if make_true:
             self._store_sum(key, net)
             # Link single named object to the sum class
             if len(sym) == 1 and sym[0][0] == '+':
@@ -622,11 +545,8 @@ class Validator:
         else:
             cls = self._find_sum_class(key)
             val = self.class_values.get(cls)
-            if val is None:
-                self.errors.append(self._err(stmt.line, f"'{key} = {net}' is unproven"))
-            elif val != net:
-                self.errors.append(self._err(stmt.line, f"'{key} = {net}' is false"))
-            else:
+            matches = (val is not None and val == net)
+            if matches == stmt.goal:
                 if len(sym) == 1 and sym[0][0] == '+':
                     name = sym[0][1]
                     self.known_equalities.discard(cls)
@@ -634,6 +554,12 @@ class Validator:
                     self.known_equalities.add(new_cls)
                     self.class_values.pop(cls, None)
                     self.class_values[new_cls] = val
+            else:
+                if val is None:
+                    self.errors.append(self._err(stmt.line, f"'{key} = {net} is {expected_str}' is unproven"))
+                else:
+                    self.errors.append(self._err(stmt.line,
+                                                 f"'{key} = {net} is {expected_str}' is false"))
 
     def _canonicalize_sum_key(self, key):
         """Replace each term in a sum key with the canonical representative of its equality class."""
@@ -655,6 +581,7 @@ class Validator:
         """AB + CD = EF - GH"""
         left_canon = self.normalize_signed_sum(stmt.objects[0])
         right_canon = self.normalize_signed_sum(stmt.objects[1])
+        make_true = is_hypothesis or (stmt.in_let and not self.last_let_failed)
 
         if not self._check_defined(left_canon, stmt.line): return
         if not self._check_defined(right_canon, stmt.line): return
@@ -670,11 +597,12 @@ class Validator:
         flipped_right = [('+' if s == '-' else '-', n) for s, n in right_sym]
         combined_sym = tuple(left_sym) + tuple(flipped_right)
 
-
         if not combined_sym:
             ok = (net_numeric == 0.0)
-            if not ok:
-                self.errors.append(self._err(stmt.line, f"Numeric conflict: sides differ by {net_numeric}"))
+            if not (ok == stmt.goal):
+                expected_str = "true" if stmt.goal else "false"
+                self.errors.append(self._err(stmt.line,
+                                             f"'{left_canon} = {right_canon}' is {'true' if ok else 'false'}, expected {expected_str}"))
             return
 
         if combined_sym[0][0] == '-':
@@ -687,47 +615,78 @@ class Validator:
         left_key = tuple(left_sym)
         right_key = tuple(right_sym)
 
-        if is_hypothesis:
+        if make_true:
             if not left_sym and right_sym:
-                # 50 = EF so bring number to right EF = 50
                 self._store_sum(right_key, -net_numeric)
             elif left_sym and not right_sym:
                 self._store_sum(left_key, net_numeric)
             else:
-                # no numbers
                 self._store_sum_symbolic(left_key, right_key)
         else:
             cls = self._find_sum_class(combined_sym)
             val = self.class_values.get(cls)
-            if val is not None and val == net_numeric:
-                if len(left_sym) == 1 and left_sym[0][0] == '+' and not right_sym:
-                    name = left_sym[0][1]
-                    self.known_equalities.discard(cls)
-                    new_cls = cls | frozenset([name])
-                    self.known_equalities.add(new_cls)
-                    self.class_values.pop(cls, None)
-                    self.class_values[new_cls] = val
-                return
-            elif val is not None and val != net_numeric:
-                self.errors.append(self._err(stmt.line,
-                                             f"'{left_canon} = {right_canon}' is false (expected {val}, got {net_numeric})"))
+            if val is not None:
+                matches = (val == net_numeric)
+                if matches == stmt.goal:
+                    if len(left_sym) == 1 and left_sym[0][0] == '+' and not right_sym:
+                        name = left_sym[0][1]
+                        self.known_equalities.discard(cls)
+                        new_cls = cls | frozenset([name])
+                        self.known_equalities.add(new_cls)
+                        self.class_values.pop(cls, None)
+                        self.class_values[new_cls] = val
+                    return
+                else:
+                    expected_str = "true" if stmt.goal else "false"
+                    self.errors.append(self._err(stmt.line,
+                                                 f"'{left_canon} = {right_canon}' is {'true' if matches else 'false'}, expected {expected_str}"))
             elif net_numeric == 0.0:
                 lc = self._find_sum_class(tuple(left_sym))
                 rc = self._find_sum_class(tuple(right_sym))
-                if lc is not None and lc == rc:
+                if (lc is not None and lc == rc) == stmt.goal:
                     return
-                self.errors.append(self._err(stmt.line, f"'{left_canon} = {right_canon}' is unproven"))
+                self.errors.append(self._err(stmt.line,
+                                             f"'{left_canon} = {right_canon}' is unproven as {'true' if stmt.goal else 'false'}"))
             else:
-                self.errors.append(self._err(stmt.line, f"'{left_canon} = {right_canon}' is unproven"))
+                self.errors.append(self._err(stmt.line,
+                                             f"'{left_canon} = {right_canon}' is unproven as {'true' if stmt.goal else 'false'}"))
+
+    def _concretize_statement(self, stmt, bindings):
+        """Return a new Statement with all variables substituted with bindings."""
+        if stmt.type in ('equality', 'inequality'):
+            left = self.substitute_variables(stmt.objects[0], bindings)
+            right = self.substitute_variables(stmt.objects[1], bindings)
+            return Statement(stmt.type, [left, right], line=stmt.line, goal=stmt.goal)
+        elif stmt.type == 'assignment':
+            left = self.substitute_variables(stmt.objects[0], bindings)
+            right = self.substitute_variables(stmt.objects[1], bindings)
+            return Statement(stmt.type, [left, right], line=stmt.line, goal=stmt.goal)
+        elif stmt.type in ('sum_assignment', 'sum_equality'):
+            new_objects = []
+            for obj in stmt.objects:
+                if isinstance(obj, list):
+                    new_objects.append([(s, self.substitute_variables(n, bindings)) for s, n in obj])
+                else:
+                    new_objects.append(self.substitute_variables(obj, bindings))
+            return Statement(stmt.type, new_objects, line=stmt.line, goal=stmt.goal)
+        return stmt
 
     def process_statement(self, stmt: Statement, is_hypothesis: bool):
+        make_true = is_hypothesis or (stmt.in_let and not self.last_let_failed)
+        if self.contradictory:
+            return
         if stmt.type == 'axiom_application':
             self.last_axiom_failed = not self.apply_axiom(stmt)
             return
 
         if stmt.type == 'let':
             for p in list(stmt.objects[0]):
+                if not is_hypothesis and p in self.defined_objects:
+                    self.errors.append(self._err(stmt.line, f"Point '{p}' already defined"))
+                    self.last_let_failed = True
+                    return
                 self.defined_objects.add(p)
+                self.last_let_failed = False
             return
 
         if stmt.type == 'chain_conclusion':
@@ -763,36 +722,24 @@ class Validator:
             left = self.normalize_object(stmt.objects[0])
             right = self.normalize_object(stmt.objects[1])
             result = self.get_equality_value(left, right)
-            if result == 11:
-                self.errors.append(self._err(stmt.line, f"Object '{left}' not defined"))
-                return
-            if result == 12:
-                self.errors.append(self._err(stmt.line, f"Object '{right}' not defined"))
-                return
             pair = frozenset([left, right])
-            if is_hypothesis:
-                self.known_equalities.add(pair)
-            else:
-                if result == 1: self.errors.append(self._err(stmt.line, f"'{left} = {right}' is unproven"))
-                if result == 2: self.errors.append(self._err(stmt.line, f"'{left} = {right}' is false"))
-            return
+            expected_str = "true" if stmt.goal else "false"
 
-        if stmt.type == 'inequality':
-            left = self.normalize_object(stmt.objects[0])
-            right = self.normalize_object(stmt.objects[1])
-            result = self.get_equality_value(left, right, inequality=True)
             if result == 11:
                 self.errors.append(self._err(stmt.line, f"Object '{left}' not defined"))
                 return
             if result == 12:
                 self.errors.append(self._err(stmt.line, f"Object '{right}' not defined"))
                 return
-            pair = frozenset([left, right])
-            if is_hypothesis:
-                self.known_inequalities.add(pair)
+
+            if make_true:
+                if stmt.goal:
+                    self.known_equalities.add(pair)
+                else:
+                    self.known_inequalities.add(pair)
             else:
-                if result == 1: self.errors.append(self._err(stmt.line, f"'{left} != {right}' is unproven"))
-                if result == 2: self.errors.append(self._err(stmt.line, f"'{left} != {right}' is false"))
+                if result == 1: self.errors.append(self._err(stmt.line, f"'{left} = {right} is {'true' if stmt.goal else 'false'}' is unproven"))
+                elif bool(result) == stmt.goal : self.errors.append(self._err(stmt.line, f"'{left} = {right}' is {'false' if stmt.goal else 'true'}, expected {expected_str}"))
             return
 
         if stmt.type == 'assignment':
@@ -802,15 +749,16 @@ class Validator:
             if result == 11:
                 self.errors.append(self._err(stmt.line, f"Object '{left}' not defined"))
                 return
+
             left_class = self._find_sum_class(left)
-            if is_hypothesis:
+            if make_true:
                 if left_class is None:
                     left_class = frozenset([left])
                     self.known_equalities.add(left_class)
                 self.class_values[left_class] = float(right)
             else:
-                if result == 1: self.errors.append(self._err(stmt.line, f"'{left} = {right}' is unproven"))
-                if result == 2: self.errors.append(self._err(stmt.line, f"'{left} = {right}' is false"))
+                if result == 1: self.errors.append(self._err(stmt.line, f"'{left} = {right} is {'true' if stmt.goal else 'false'}' is unproven"))
+                elif bool(result) == stmt.goal: self.errors.append(self._err(stmt.line, f"'{left} = {right} is {'true' if stmt.goal else 'false'}' is false"))
             return
 
         if stmt.type == 'sum_assignment':
@@ -824,6 +772,16 @@ class Validator:
         if stmt.type == 'print':
             print(stmt.objects[0])
             return
+
+        if stmt.type == 'true':
+            if make_true:
+                if not stmt.goal:
+                    self.contradictory = True
+            else:
+                if not stmt.goal:
+                    self.errors.append(self._err(stmt.line, f"'{stmt.objects} is {'false' if stmt.objects == 'true' else 'true'}' was disproven"))
+            return
+
 
     def apply_axiom(self, stmt: Statement):
         axiom_name = stmt.objects[0]
@@ -855,7 +813,6 @@ class Validator:
                     p_binds.append(provided_char)
 
         bindings = dict(zip(a_binds, p_binds))
-        print(bindings)
 
         for numvar, provided_num in zip(axiom.let_numvars, raw_args[len(axiom.let_objects):]):
             bindings[numvar] = provided_num
@@ -873,7 +830,7 @@ class Validator:
 
         declared_points = {p for obj in axiom.let_objects for p in obj}
         for s in list(axiom.given.statements) + axiom.then:
-            if s.type in ('assignment', 'sum_assignment', 'sum_equality', 'let_numvar'):
+            if s.type in ('assignment', 'sum_assignment', 'sum_equality', 'let_numvar', 'true'):
                 continue
             for obj in s.objects:
                 if isinstance(obj, list):
@@ -892,7 +849,6 @@ class Validator:
             return self._substitute_numeric_values(with_bindings)
 
         for hyp in axiom.given.statements:
-
             if hyp.type == 'let':
                 obj = hyp.objects[0]
                 if obj in bindings:
@@ -907,9 +863,9 @@ class Validator:
             elif hyp.type == 'equality':
                 left = self.normalize_object(self.substitute_variables(hyp.objects[0], bindings))
                 right = self.normalize_object(self.substitute_variables(hyp.objects[1], bindings))
-                if not any(left in eq and right in eq for eq in self.known_equalities):
+                if not any(left in eq and right in eq for eq in (self.known_equalities if hyp.goal else self.known_inequalities)):
                     self.errors.append(
-                        self._err(line, f"Axiom '{axiom_name}': condition '{left} = {right}' not satisfied"))
+                        self._err(line, f"Axiom '{axiom_name}': condition '{left} = {right} is {'true' if hyp.goal else 'false'}' not satisfied"))
                     return False
 
             elif hyp.type == 'contains':
@@ -918,14 +874,6 @@ class Validator:
                 if (left, right) not in self.known_contains and right not in left:
                     self.errors.append(
                         self._err(line, f"Axiom '{axiom_name}': condition '{left} contains {right}' not satisfied"))
-                    return False
-
-            elif hyp.type == 'inequality':
-                left = self.normalize_object(self.substitute_variables(hyp.objects[0], bindings))
-                right = self.normalize_object(self.substitute_variables(hyp.objects[1], bindings))
-                if not any(left in iq and right in iq for iq in self.known_inequalities):
-                    self.errors.append(
-                        self._err(line, f"Axiom '{axiom_name}': condition '{left} != {right}' not satisfied"))
                     return False
 
             elif hyp.type == 'assignment':
@@ -988,51 +936,12 @@ class Validator:
                         self.errors.append(self._err(line, f"Axiom '{axiom_name}': condition not satisfied"))
                         return False
 
+            elif hyp.type == 'true':
+                if not hyp.goal:
+                    return True
+
         for thesis in axiom.then:
-            if thesis.type == 'equality':
-                left = self.normalize_object(self.substitute_variables(thesis.objects[0], bindings))
-                right = self.normalize_object(self.substitute_variables(thesis.objects[1], bindings))
-                self.known_equalities.add(frozenset([left, right]))
-
-            elif thesis.type == 'inequality':
-                left = self.normalize_object(self.substitute_variables(thesis.objects[0], bindings))
-                right = self.normalize_object(self.substitute_variables(thesis.objects[1], bindings))
-                self.known_inequalities.add(frozenset([left, right]))
-
-            elif thesis.type == 'sum_assignment':
-                concrete = concretize(thesis.objects[0])
-                canon = self.normalize_signed_sum(concrete)
-                value = float(self.substitute_variables(thesis.objects[1], bindings))
-                numeric, sym = self._split_numeric_symbolic(canon)
-                net = value - numeric
-                if sym:
-                    self._store_sum(tuple(sym), net)
-                # if not sym: fully numeric, nothing to store
-
-            elif thesis.type == 'sum_equality':
-                left_concrete = concretize(thesis.objects[0])
-                right_concrete = concretize(thesis.objects[1])
-                left_norm = self.normalize_signed_sum(left_concrete)
-                right_norm = self.normalize_signed_sum(right_concrete)
-
-                left_num, left_sym = self._split_numeric_symbolic(left_norm)
-                right_num, right_sym = self._split_numeric_symbolic(right_norm)
-                net_numeric = right_num - left_num
-
-                left_key = tuple(left_sym)
-                right_key = tuple(right_sym)
-
-                if not left_sym and not right_sym:
-                    pass
-                elif not right_sym:
-                    self._store_sum(left_key, net_numeric)
-                elif not left_sym:
-                    self._store_sum(right_key, -net_numeric)
-                else:
-                    self._store_sum_symbolic(left_key, right_key)
-                    if net_numeric != 0.0:
-                        flipped = [('+' if s == '-' else '-', n) for s, n in right_sym]
-                        combined_sym = left_key + tuple(flipped)
-                        self._store_sum(combined_sym, net_numeric)
+            concrete_stmt = self._concretize_statement(thesis, bindings)
+            self.process_statement(concrete_stmt, is_hypothesis=True)
 
         return True

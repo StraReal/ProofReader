@@ -1,13 +1,18 @@
 import BasicAxioms
 
+
 Hypothesis:
     let ABC
     let DEF
-    angABC = angDEF
-    AC contains B
-    BC = EF
-    angBCA = angEFD
+    let G
+    angABC = angBAC
+    G = A
+    AD = AG
+    AB = DE+EF
 
 Proof:
-    SegmentAddition{AB BC} => AB+BC = AC
-    AngleSideAngleCongruence{ABC DEF} => ABC = DEF
+    let HI = 0
+    HI = 0
+    DE+EF = AB
+    ZeroSegment{A G} => AG = 0
+    AD = 0

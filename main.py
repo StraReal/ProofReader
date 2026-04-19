@@ -21,6 +21,20 @@ simple_keywords = {
     'import': 'IMPORT',
     'contains': 'CONTAINS',
     'print': 'PRINT',
+    'axiom': 'AXIOM',
+    'theorem': 'THEOREM',
+
+
+    'is': 'IS',
+    'true': 'TRUE',
+    'false': 'FALSE',
+}
+
+colon_keywords = {
+    'Then': 'THEN',
+    'Given': 'GIVEN',
+    'Hypothesis': 'HYPOTHESIS',
+    'Proof': 'PROOF',
 }
 
 #lexer
@@ -34,30 +48,23 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
             if line[pos].isspace():
                 pos += 1
                 continue
-            # Hypothesis keyword
-            if line[pos:].startswith('Hypothesis'):
-                tokens.append(Token('HYPOTHESIS', 'Hypothesis', line_num, line))
-                pos += 10
-
-            # Proof keyword
-            elif line[pos:].startswith('Proof'):
-                tokens.append(Token('PROOF', 'Proof', line_num, line))
-                pos += 5
-            elif line[pos:].startswith('axiom '):
-                tokens.append(Token('AXIOM', 'axiom', line_num, line))
-                pos += 5
-            elif line[pos:].startswith('theorem '):
-                tokens.append(Token('THEOREM', 'theorem', line_num, line))
-                pos += 7
-            elif line[pos:].startswith('Given'):
-                tokens.append(Token('GIVEN', 'Given', line_num, line))
-                pos += 5
-
-            elif line[pos:].startswith('Then'):
-                tokens.append(Token('THEN', 'Then', line_num, line))
-                pos += 4
-
             matched = False
+            for keyword, token_type in colon_keywords.items():
+                if line[pos:].startswith(keyword):
+                    colon = False
+                    while pos < len(line):
+                        if line[pos] == ':':
+                            colon = True
+                            break
+                        pos += 1
+                    if not colon:
+                        print_error(line_num, f"Syntax Error: Missing colon in front of {keyword}", import_map)
+                        sys.exit(1)
+                    tokens.append(Token(token_type, keyword, line_num, line))
+                    pos += len(keyword)
+                    matched = True
+                    break
+
             for keyword, token_type in simple_keywords.items():
                 if line[pos:].startswith(keyword):
                     end_pos = pos + len(keyword)
@@ -126,7 +133,6 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
                     pos += 1
                 tokens.append(Token('NUMBER', num, line_num, line))
                 continue
-
 
             elif line[pos:].startswith('#'):
                 line = line[:pos]

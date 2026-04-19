@@ -44,3 +44,18 @@ axiom SegmentAddition:
         AB contains M
     Then:
         AM + BM = AB
+
+axiom ZeroSegment:
+    Given:
+        let A
+        let B
+        A = B
+    Then:
+        AB = 0
+
+axiom PointCollapse:
+    Given:
+        let AG
+        AG = 0
+    Then:
+        A = G

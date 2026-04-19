@@ -5,9 +5,11 @@ import sys
 @dataclass
 class Statement:
     type: str  # 'let', 'equality', 'angle_claim'
-    objects: List[str]  # ABC, AC, BC, etc.
+    objects: List[str]|str  # ABC, AC, BC, etc.
     value: Optional[str] = None  # For equalities/angles
     line: int = 0
+    goal: bool = True
+    in_let: bool = False
 
 @dataclass
 class HypothesisBlock:
