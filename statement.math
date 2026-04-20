@@ -1,18 +1,17 @@
-import BasicAxioms
-
+#import BasicAxioms
+import MathAxioms
 
 Hypothesis:
+    let a : Nat = 5
+    let b : Nat = 6
+    let c : Nat = 2
+    let d : Nat = 1
     let ABC
     let DEF
-    let G
-    angABC = angBAC
-    G = A
-    AD = AG
-    AB = DE+EF
+    ABC = DEF
+    let truevar : Bool = true
 
 Proof:
-    let HI = 0
-    HI = 0
-    DE+EF = AB
-    ZeroSegment{A G} => AG = 0
-    AD = 0
+    ABC equals DEF
+    truevar equals true
+    a + d equals b

@@ -3,6 +3,33 @@ axiom SideSwitching:
         let AB
         let CD
         let EF
-        AB + CD = EF
+        AB + CD equals EF
     Then:
-        AB = EF - CD
+        AB equals EF - CD
+
+type Nat
+type Bool
+type Int
+
+operation Nat = Nat
+
+@[extern int_add]
+operation Int + Int -> Int
+
+@[extern int_add]
+operation Int + Nat -> Int
+
+@[extern int_add]
+operation Nat + Nat -> Nat
+
+@[extern int_mul]
+operation Nat * Nat -> Nat
+
+@[extern int_sub]
+operation Nat - Nat -> Nat
+
+@[extern int_comp]
+operation Nat equals Nat -> Bool
+
+@[extern gen_eq_comp]
+operation Bool equals Bool -> Bool

@@ -1,6 +1,16 @@
 from common_classes import *
 from itertools import combinations
 
+attributes = {}
+op_map = {
+            'PLUS': ('+', 2),
+            'MINUS': ('-', 2),
+            'ASSIGN': ('=', 0),
+            'MULTIPLY': ('*', 3),
+            'DIVIDE': ('/', 3),
+            'EQUALS': ('equals', 1)
+        }
+
 class Parser:
     def __init__(self, tokens: List[Token], import_map: dict):
         self.tokens = tokens
@@ -8,12 +18,18 @@ class Parser:
         self.axioms: Dict[str, AxiomDefinition] = {}
         self.theorems: Dict[str, TheoremDefinition] = {}
         self.import_map: dict = import_map
+        self.operations = {}
+        self.types = {}
+        self.pending_attributes = {}
 
     def current(self) -> Token:
         return self.tokens[self.pos] if self.pos < len(self.tokens) else self.tokens[-1]
 
     def advance(self):
         self.pos += 1
+
+    def regress(self):
+        self.pos -= 1
 
     def parse(self) -> tuple[Dict[str, AxiomDefinition], Dict[str, TheoremDefinition], Optional[HypothesisBlock], List[Statement], list, list]:
         hypothesis = None
@@ -29,9 +45,31 @@ class Parser:
                 theorem = self.parse_theorem()
                 self.theorems[theorem.name] = theorem
                 ordered.append(('theorem', theorem))
+
+            elif self.current().type == 'AT':
+                self.advance()  # @
+                self.advance()  # [
+                attr_name = self.current().value
+                self.advance()
+                attr_args = []
+                while self.current().type != 'RBRACKET':
+                    attr_args.append(self.current().value)
+                    self.advance()
+                self.advance()  # ]
+                self.pending_attributes[attr_name] = attr_args
+
+            elif self.current().type == 'OPERATION':
+                op = self.parse_operation_definition()
+                self.operations[(op.left_type, op.operator, op.right_type)] = (op.return_type, op.cases, op.attributes)
+                ordered.append(('operation', op))
+
+            elif self.current().type == 'TYPE':
+                td = self.parse_type()
+                self.types[td] = td
+                ordered.append(('type', td))
             elif self.current().type == 'IMPORT':
                 self.advance()
-                if self.current().type == 'IDENT':
+                if self.current().type == 'VARIABLE':
                     return self.axioms, self.theorems, hypothesis, proofs, [self.current().value, self.current().line_num], ordered
             elif self.current().type == 'HYPOTHESIS':
                 self.advance()
@@ -42,7 +80,6 @@ class Parser:
                 stmt = self.parse_statement()
                 if stmt:
                     proofs.extend(stmt)
-
         return self.axioms, self.theorems, hypothesis, proofs, [], ordered
 
     def parse_hypothesis_block(self, stop_tokens: List[str] = None) -> HypothesisBlock:
@@ -60,7 +97,7 @@ class Parser:
         self.advance()  # skip 'axiom'
 
         line = self.current().line_num
-        if self.current().type != 'IDENT':
+        if self.current().type != 'VARIABLE':
             print_error(line, f"Syntax Error: Expected axiom name", self.import_map)
             sys.exit(1)
         name = self.current().value
@@ -88,7 +125,7 @@ class Parser:
             self.advance()
 
         then_statements = []
-        while self.current().type not in ('AXIOM', 'THEOREM', 'HYPOTHESIS', 'PROOF', 'EOF'):
+        while self.current().type not in ('PROOF', 'AXIOM', 'THEOREM', 'TYPE','OPERATION','HYPOTHESIS', 'EOF', 'AT'):
             stmts = self.parse_statement()
             if stmts:
                 then_statements.extend(stmts)
@@ -107,7 +144,7 @@ class Parser:
         self.advance()
         line = self.current().line_num
 
-        if self.current().type != 'IDENT':
+        if self.current().type != 'VARIABLE':
             print_error(line, "Syntax Error: Expected theorem name", self.import_map)
             sys.exit(1)
         name = self.current().value
@@ -136,7 +173,7 @@ class Parser:
             self.advance()
 
         then_statements = []
-        while self.current().type not in ('PROOF', 'AXIOM', 'THEOREM', 'HYPOTHESIS', 'EOF'):
+        while self.current().type not in ('PROOF', 'AXIOM', 'THEOREM', 'TYPE','OPERATION','HYPOTHESIS', 'EOF', 'AT'):
             stmts = self.parse_statement()
             if stmts:
                 then_statements.extend(stmts)
@@ -149,7 +186,7 @@ class Parser:
             self.advance()
 
         proof_statements = []
-        while self.current().type not in ('AXIOM', 'THEOREM', 'HYPOTHESIS', 'EOF'):
+        while self.current().type not in ('PROOF', 'AXIOM', 'THEOREM', 'TYPE','OPERATION','HYPOTHESIS', 'EOF', 'AT'):
             stmts = self.parse_statement()
             if stmts:
                 proof_statements.extend(stmts)
@@ -178,6 +215,83 @@ class Parser:
             self.advance()
         return operands
 
+    def parse_operation_definition(self):
+        self.advance()  # skip 'operation'
+
+        left_type = self.current().value
+        self.advance()
+
+        line = self.current().line_num
+        if self.types.get(left_type) is None:
+            print_error(line, f"Syntax Error: Undefined type '{left_type}'",
+                        self.import_map)
+            sys.exit(1)
+
+        operator = self.current().type  # PLUS, MINUS, MULTIPLY
+        self.advance()
+
+        right_type = self.current().value
+        self.advance()
+
+        line = self.current().line_num
+        if self.types.get(left_type) is None:
+            print_error(line, f"Syntax Error: Undefined type '{right_type}'",
+                        self.import_map)
+            sys.exit(1)
+
+        return_type = None
+        if self.current().type == 'ARROW_TYPE':
+            self.advance()
+            return_type = self.current().value
+            self.advance()
+
+        cases = []
+        if self.current().type == 'COLON':
+            self.advance()
+            while self.current().type not in ('EOF', 'OPERATION', 'TYPE', 'THEOREM', 'AXIOM'):
+                case = self.parse_statement()
+                if case:
+                    cases.extend(case)
+
+        attributes = self.pending_attributes
+        self.pending_attributes = {}
+        return OperationDefinition(
+            left_type=left_type,
+            operator=operator,
+            right_type=right_type,
+            return_type=return_type,
+            cases=cases,
+            attributes=attributes,  # from @[...] if any
+        )
+
+    def parse_type(self):
+        self.advance()  # skip 'type'
+
+        name = self.current().value
+        self.advance()
+
+        constructors = []
+        if self.current().type == 'COLON':
+            self.advance()
+            while self.current().type not in ('EOF', 'OPERATION', 'TYPE', 'THEOREM', 'AXIOM', 'HYPOTHESIS'):
+                if self.current().type == 'VARIABLE':
+                    constructor_name = self.current().value
+                    self.advance()
+                    args = []
+                    if self.current().type == 'LPAR':
+                        self.advance()
+                        while self.current().type != 'RPAR':
+                            args.append(self.current().value)
+                            self.advance()
+                            if self.current().type == 'COMMA':
+                                self.advance()
+                        self.advance()  # skip )
+                    constructors.append((constructor_name, args))
+                else:
+                    self.advance()
+
+        return name
+
     def parse_axiom_bindings(self) -> list:
         raw_args = []
         while self.current().type != 'RBRACE':
@@ -193,7 +307,7 @@ class Parser:
     def _parse_equality_chain(self, first_operands, left_type, line):
         """Parse = B = C = D... and return list of all sides."""
         sides = [first_operands]
-        while self.current().type == 'EQUALS':
+        while self.current().type == 'ASSIGN':
             self.advance()
             rhs = self.parse_rhs(left_type, line)
             if rhs[0] == 'single':
@@ -204,39 +318,57 @@ class Parser:
                 sides.append(right_operands)
         return sides
 
-    def _emit_pair(self, left, right, line):
-        statements = []
-        # Normalize both sides to operand lists
-        if isinstance(left, tuple) and not isinstance(left[0], tuple):
-            # it's a (value, type) single token
-            left_val, left_type = left
-            left_ops = [('+', left_val)]
-        else:
-            left_ops = left
-            left_type = 'IDENT'  # default
+    def parse_expression(self, left):
 
-        if isinstance(right, tuple) and not isinstance(right[0], tuple):
-            right_val, right_type = right
-            right_ops = [('+', right_val)]
-        else:
-            right_val = None
-            right_type = None
-            right_ops = right
+        max_prec = 0
+        operators = []
+        operands = [left]
 
-        # Single = single
-        if len(left_ops) == 1 and right_val is not None:
-            if right_type in ('NUMBER', 'NUMVAR'):
-                statements.append(Statement('assignment', [left_ops[0][1], right_val], line=line))
+        while self.current().type in op_map:
+            operators.append((self.current().type, op_map[self.current().type][1]))
+            max_prec = max(max_prec, op_map[self.current().type][1])
+            self.advance()
+            if self.current().type == 'VARIABLE' or self.current().type.startswith('LIT'):
+                operands.append((self.current().type, self.current().value))
             else:
-                statements.append(Statement('equality', [left_ops[0][1], right_val], line=line))
-        # Multi = single number
-        elif right_val is not None and right_type in ('NUMBER', 'NUMVAR'):
-            statements.append(Statement('sum_assignment', [left_ops, right_val], line=line))
-        # anything = multi, or multi = single ident
-        else:
-            statements.append(Statement('sum_equality', [left_ops, right_ops], line=line))
+                print_error(self.current().line_num, f"Unexpected value in expression: {self.current().value}", self.import_map)
+            self.advance()
 
-        return statements
+        if len(operands) != len(operators) + 1:
+            print_error(self.current().line_num, f"Unexpected error",
+                        self.import_map)
+
+        if len(operators) == 0:
+            return Expression(operator='pass', left=left, right=left, line=self.current().line_num)
+        expr = None
+
+        for i in range(max_prec, -1, -1):
+            j = 0
+            while j < len(operators):
+                if operators[j][1] == i:
+                    l = operands[j]
+                    r = operands[j + 1]
+                    expr = Expression(operator=operators[j][0], left=l, right=r, line=self.current().line_num)
+                    operands[j] = expr
+                    operands.pop(j + 1)
+                    operators.pop(j)
+                else:
+                    j += 1
+        return expr
+
+    def parse_primary(self, val_type, value):
+        """Parse a single operand (valued or variable)"""
+        if val_type in ('INT', 'NAT','FLOAT','BOOL'):
+            if value == 'true':
+                value = True
+            if value == 'false':
+                value = False
+            return val_type, value
+        elif val_type == 'VARIABLE':
+            return 'VARIABLE', value
+        else:
+            print_error(self.current().line, f"Expected operand, got {val_type}", self.import_map)
+            sys.exit(1)
 
     def parse_statement(self) -> List[Statement]:
         statements = []
@@ -268,187 +400,22 @@ class Parser:
 
             obj_type = self.current().type
             obj = self.current().value if obj_type in ('IDENT', 'ANGLE', 'NUMVAR', 'VARIABLE') else None
-            self.advance()
 
             statements.append(Statement('let', [obj], line=line))
 
-            if obj_type == 'NUMVAR':
-                left = obj
-                left_operands = self.parse_sum_operands(left, ('NUMBER', 'IDENT', 'ANGLE', 'NUMVAR'))
-
-                if self.current().type == 'EQUALS':
-                    self.advance()
-                    rhs = self.parse_rhs(('NUMVAR', 'ANGLE', 'IDENT', 'NUMBER'), line)
-                    if rhs[0] == 'single':
-                        _, right, right_type = rhs
-                        if right_type in ('NUMBER', 'NUMVAR'):
-                            if len(left_operands) == 1:
-                                statements.append(Statement('assignment', [left, right], line=line))
-                            else:
-                                statements.append(Statement('sum_assignment', [left_operands, right], line=line))
-                        elif right_type in ('IDENT', 'ANGLE'):
-                            if len(left_operands) == 1:
-                                statements.append(Statement('equality', [left, right], line=line))
-                            else:
-                                statements.append(Statement('sum_equality', [left_operands, [('+', right)]], line=line))
-                    else:
-                        _, right_operands = rhs
-                        statements.append(Statement('sum_equality', [left_operands, right_operands], line=line))
-
-                if self.current().type == 'INEQUALS':
-                    self.advance()
-                    right = self.current().value
-                    self.advance()
-                    statements.append(Statement('inequality', [left, right], line=line))
-
-            if obj_type == 'IDENT':
-                left = obj
-                left_operands = self.parse_sum_operands(left, ('NUMBER', 'IDENT', 'ANGLE', 'NUMVAR'))
-
-                if self.current().type == 'EQUALS':
-                    self.advance()
-                    rhs = self.parse_rhs(('NUMVAR', 'ANGLE', 'IDENT', 'NUMBER'), line)
-                    if rhs[0] == 'single':
-                        _, right, right_type = rhs
-                        if right_type in ('NUMBER', 'NUMVAR'):
-                            if len(left_operands) == 1:
-                                statements.append(Statement('assignment', [left, right], line=line, in_let=True))
-                            else:
-                                statements.append(Statement('sum_assignment', [left_operands, right], line=line, in_let=True))
-                        elif right_type in ('IDENT', 'ANGLE'):
-                            if len(left_operands) == 1:
-                                statements.append(Statement('equality', [left, right], line=line, in_let=True))
-                            else:
-                                statements.append(Statement('sum_equality', [left_operands, [('+', right)]], line=line, in_let=True))
-                    else:
-                        _, right_operands = rhs
-                        statements.append(Statement('sum_equality', [left_operands, right_operands], line=line, in_let=True))
-
-                if self.current().type == 'INEQUALS':
-                    self.advance()
-                    right = self.current().value
-                    self.advance()
-                    statements.append(Statement('equality', [left, right], line=line, goal=False))
-
-            if self.current().type == 'EQUALS':
-                self.advance()
-            if self.current().type == 'ISO':
-                self.advance()
-                points = list(obj)
-                if len(points) != 3:
-                    print_error(line, f"Syntax Error: 'iso' requires a 3-point plane, given: {''.join(points)}",
-                                self.import_map)
-                    sys.exit(1)
-                base = points[0] + points[1]
-                if self.current().type == 'BASE':
-                    self.advance()
-                    base = self.current().value if self.current().type == 'IDENT' else base
-                    if len(base) != 2:
-                        print_error(line,
-                                    f"Syntax Error: 'base' requires a 2-letter edge name (given {base})",
-                                    self.import_map)
-                        sys.exit(1)
-                    if not (base[0] in points and base[1] in points):
-                        print_error(line, f"Syntax Error: 'base' must use points from triangle (given: {base} to {points})", self.import_map)
-                        sys.exit(1)
-                    self.advance()
-                if base == points[0] + points[1]:
-                    equal_sides = [points[0] + points[2], points[1] + points[2]]
-                elif base == points[0] + points[2]:
-                    equal_sides = [points[0] + points[1], points[1] + points[2]]
-                else:
-                    equal_sides = [points[0] + points[1], points[0] + points[2]]
-                for i in range(len(equal_sides) - 1):
-                    statements.append(Statement('equality', [equal_sides[i], equal_sides[i + 1]], line=line))
-
-            if self.current().type == 'MEDIAN':
-                self.advance()
-                point = list(obj)
-                if obj_type != 'IDENT':
-                    print_error(line, f"Syntax Error: 'median' requires an identifier, given: {obj_type}", self.import_map)
-                    sys.exit(1)
-                if len(point) != 1:
-                    print_error(line, f"Syntax Error: 'median' requires a single point, given: {''.join(point)}",
-                                self.import_map)
-                    sys.exit(1)
-                if self.current().type != 'IDENT':
-                    print_error(line, f"Syntax Error: identifier expected after 'median', given {self.current().type}",
-                                self.import_map)
-                    sys.exit(1)
-                base = self.current().value
-                if len(base) != 2:
-                    print_error(line, f"Syntax Error: 'median' is defined by a 2-letter edge name, given {base}",
-                                self.import_map)
-                    sys.exit(1)
-
-                equality_pair = [base[0] + point[0], base[1] + point[0]]
-                statements.append(Statement('equality', equality_pair, line=line))
-                statements.append(Statement('contains', [base, point[0]], line=line))
-
-            if self.current().type == 'BISECTOR':
-                self.advance()
-                point = list(obj)
-                if obj_type != 'IDENT':
-                    print_error(line, f"Syntax Error: 'bisector' requires an identifier, given: {obj_type}",
-                                self.import_map)
-                    sys.exit(1)
-                if len(point) != 1:
-                    print_error(line, f"Syntax Error: 'bisector' requires a single point, given: {''.join(point)}",
-                                self.import_map)
-                    sys.exit(1)
-
-                base = self.current().value
-                if self.current().type != 'ANGLE' or len(base) != 6:
-                    print_error(line, f"Syntax Error: valid angle expected after 'bisector' (given {base})",
-                                self.import_map)
-                    sys.exit(1)
-                base = base[3:]
-
-                equality_pair = ['ang'+base[0]+base[1]+point[0], 'ang'+point[0]+base[1]+base[2]]
-                statements.append(Statement('equality', equality_pair, line=line))
-
-            if self.current().type == 'SQUARE':
-                self.advance()
-                points = list(obj)
-                if len(points) != 4:
-                    print_error(line, f"Syntax Error: 'square' requires a 4-point plane, given: {''.join(points)}",
-                                self.import_map)
-                    sys.exit(1)
-                for i in range(len(points) - 2):
-                    statements.append(Statement('equality', [points[i] + points[i + 1],
-                                                             points[i + 1] + points[(i + 2) % len(points)]], line=line))
-
-            if self.current().type == 'RECTANGLE':
-                self.advance()
-                points = list(obj)
-                if obj_type != 'IDENT':
-                    print_error(line, f"Syntax Error: 'rectangle' requires an identifier, given: {obj_type}",
-                                self.import_map)
-                    sys.exit(1)
-                if len(points) != 4:
-                    print_error(line, f"Syntax Error: 'rectangle' requires a 4-point plane, given: {''.join(points)}",
-                                self.import_map)
-                    sys.exit(1)
-
-                statements.append(Statement('equality', [points[0] + points[1],
-                                                            points[2] + points[3]], line=line))
-                statements.append(Statement('equality', [points[1] + points[2],
-                                                         points[3] + points[0]], line=line))
-
-            if self.current().type == 'EQUILATERAL':
-                self.advance()
-                points = list(obj)
-                for i in range(len(points) - 1):
-                    statements.append(Statement('equality', [points[i] + points[i + 1],
-                                                             points[i + 1] + points[(i + 2) % len(points)]], line=line))
+            following = self.parse_statement()
+            for s in following:
+                if s.line == line:
+                    s.in_let = True
+            statements.extend(following)
 
         elif self.current().type == 'NUMVAR':
             left = self.current().value
             self.advance()
             left_operands = self.parse_sum_operands(left, ('NUMBER', 'IDENT', 'ANGLE', 'NUMVAR'))
-            if self.current().type == 'EQUALS':
+            if self.current().type in ('ASSIGN', 'EQUALS'):
                 sides = [(left_operands, None, None)]
-                while self.current().type == 'EQUALS':
+                while self.current().type in ('ASSIGN', 'EQUALS'):
                     self.advance()
                     rhs = self.parse_rhs(('NUMVAR', 'ANGLE', 'IDENT', 'NUMBER'), line)
                     if rhs[0] == 'single':
@@ -481,14 +448,53 @@ class Parser:
                 self.advance()
                 statements.append(Statement('equality', [left, right], line=line, goal=False))
 
+        elif self.current().type == 'VARIABLE':
+            left_obj = self.current().value
+            left_type = self.current().type
+            self.regress()
+            if self.current().type == 'LET':
+                self.advance()
+                self.advance()
+                if self.current().type != 'COLON':
+                    print_error(line, f"Syntax Error: must define variable type: {left_obj}",
+                                self.import_map)
+                    sys.exit(1)
+                self.advance()
+                if self.current().type != 'VARIABLE':
+                    print_error(line, f"Syntax Error: must define variable type: {left_obj}",
+                                self.import_map)
+                    sys.exit(1)
+                var_type = self.current().value
+                if self.types.get(var_type) is None:
+                    print_error(line, f"Syntax Error: Undefined type '{var_type}'",
+                                self.import_map)
+                    sys.exit(1)
+                statements.append(Statement('typehint', [left_obj, var_type], line=line))
+                make_operation = True
+            elif self.current().type == 'COLON': #this is a type
+                self.advance() # var (self)
+                make_operation = False
+            else:
+                self.advance() # var (self)
+                make_operation = True
+
+            self.advance()  # next token
+            if make_operation:
+                expr = self.parse_expression((left_type, left_obj))
+                self.regress()
+                l = self.current().line
+                self.advance()
+                s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
+                statements.append(s)
+
         elif self.current().type == 'IDENT':
             left = self.current().value
             left_type = self.current().type
             self.advance()
             left_operands = self.parse_sum_operands(left, (left_type,))
-            if self.current().type == 'EQUALS':
+            if self.current().type in ('ASSIGN', 'EQUALS'):
                 sides = [(left_operands, None, None)]
-                while self.current().type == 'EQUALS':
+                while self.current().type in ('ASSIGN', 'EQUALS'):
                     self.advance()
                     rhs = self.parse_rhs(left_type, line)
                     if rhs[0] == 'single':
@@ -515,7 +521,7 @@ class Parser:
                     else:
                         statements.append(Statement('sum_equality', [left_ops, right_ops], line=line))
 
-            if self.current().type == 'INEQUALS':
+            elif self.current().type == 'INEQUALS':
                 self.advance()
                 if self.current().type not in ('IDENT', 'NUMVAR'):
                     print(f"{line_val}\nSyntax Error on line {line}: Expected identifier or numvar after '!='")
@@ -524,7 +530,7 @@ class Parser:
                 self.advance()
                 statements.append(Statement('equality', [left, right], line=line, goal=False))
 
-            if self.current().type == 'IN':
+            elif self.current().type == 'IN':
                 if len(left) != 1:
                     print_error(line, f"Syntax Error: only a point can be contained, given: {left}",
                                 self.import_map)
@@ -538,7 +544,7 @@ class Parser:
                 self.advance()
                 statements.append(Statement('contains', [segment, left], line=line))
 
-            if self.current().type == 'CONTAINS':
+            elif self.current().type == 'CONTAINS':
                 if len(left) < 2:
                     print_error(line, f"Syntax Error: points can only be contained in edges or planes, given: {left}",
                                 self.import_map)
@@ -557,9 +563,9 @@ class Parser:
             left_type = self.current().type
             self.advance()
             left_operands = self.parse_sum_operands(left_angle, (left_type,))
-            if self.current().type == 'EQUALS':
+            if self.current().type in ('ASSIGN', 'EQUALS'):
                 sides = [(left_operands, None, None)]
-                while self.current().type == 'EQUALS':
+                while self.current().type in ('ASSIGN', 'EQUALS'):
                     self.advance()
                     rhs = self.parse_rhs(left_type, line)
                     if rhs[0] == 'single':
@@ -619,9 +625,9 @@ class Parser:
             left = self.current().value
             self.advance()
             left_operands = self.parse_sum_operands(left, ('NUMBER', 'ANGLE', 'IDENT'))
-            if self.current().type == 'EQUALS':
+            if self.current().type in ('ASSIGN', 'EQUALS'):
                 sides = [(left_operands, None, None)]
-                while self.current().type == 'EQUALS':
+                while self.current().type in ('ASSIGN', 'EQUALS'):
                     self.advance()
                     rhs = self.parse_rhs(('NUMBER', 'ANGLE', 'IDENT'), line)
                     if rhs[0] == 'single':
@@ -642,22 +648,26 @@ class Parser:
                     else:
                         statements.append(Statement('sum_equality', [left_ops, right_ops], line=line))
 
-        elif self.current().type == 'TRUE':
-            statements.append(Statement('true', self.current().value, line=line))
+        elif self.current().type.startswith('LIT'):
+            left_type = self.current().type
+            left_obj = self.current().value
+            l = self.current().line
             self.advance()
-        elif self.current().type == 'FALSE':
-            statements.append(Statement('true', self.current().value, line=line, goal=False))
+            expr = self.parse_expression((left_type, left_obj))
+            s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
+            statements.append(s)
             self.advance()
 
         elif self.current().type == 'PRINT':
             self.advance()
             statements.append(Statement('print', [self.current().value], line=line))
+            self.advance()
         else:
             self.advance()
-        while self.current().type == 'IS':
+        while self.current().type == 'EQUALS':
             self.advance()
-            if self.current().type in ('TRUE', 'FALSE'):
-                goal = self.current().type == 'TRUE'
+            if self.current().type == 'LITBOOL':
+                goal = self.current().value == 'true'
                 self.advance()
                 for s in statements:
                     if not goal:

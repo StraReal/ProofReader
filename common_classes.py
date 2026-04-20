@@ -1,15 +1,40 @@
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Set, Tuple, Sequence
+from typing import List, Optional, Dict, Set, Tuple, Sequence, Any, Union
 import sys
+
+
+@dataclass
+class OperationDefinition:
+    left_type: str
+    operator: str
+    right_type: str
+    return_type: str
+    cases: list  # pattern matching cases
+    attributes: dict
 
 @dataclass
 class Statement:
     type: str  # 'let', 'equality', 'angle_claim'
-    objects: List[str]|str  # ABC, AC, BC, etc.
+    objects: List[any]|str  # ABC, AC, BC, etc.
     value: Optional[str] = None  # For equalities/angles
     line: int = 0
     goal: bool = True
     in_let: bool = False
+
+@dataclass
+class Variable:
+    name: str
+
+@dataclass
+class Literal:
+    value: str
+
+@dataclass
+class Expression:
+    operator: str
+    left: 'Expression| Tuple[str, any]'
+    right: 'Expression| Tuple[str, any]'
+    line: int = None
 
 @dataclass
 class HypothesisBlock:

@@ -1,10 +1,16 @@
 import re
+from itertools import permutations
 
 from common_classes import *
+from externs import externs
+
 
 class Validator:
     def __init__(self, import_map: dict):
         self.defined_objects: Set[str] = set()
+        self.proof_defined_objects: Set[str] = set()
+        self.operations = {}
+        self.types = {}
         self.known_equalities: Set[frozenset] = set()
         self.known_inequalities: Set[frozenset] = set()
         self.axioms: Dict[str, AxiomDefinition] = {}
@@ -17,17 +23,29 @@ class Validator:
         self.known_contains = set()
         self.contradictory = False
 
+        self.variables: Dict[str, [str, any]] = {}
+
+    def normalize_comparison(self, left_type, operator, right_type):
+
+        if left_type > right_type:
+            left_type, right_type = right_type, left_type
+
+        return left_type, operator, right_type
+
+
     def validate(self, axioms: Dict[str, AxiomDefinition],
                  hypothesis: Optional[HypothesisBlock], ordered: List[Statement], proofs: List[Statement]) -> None:
         self.axioms = axioms
+
+        for kind, item in ordered:
+            if kind == 'operation':
+                t = self.normalize_comparison(item.left_type, item.operator, item.right_type)
+                self.operations[t] = (item.return_type, item.cases, item.attributes)
 
         if hypothesis:
             for stmt in hypothesis.statements:
                 self.process_statement(stmt, is_hypothesis=True)
             self.propagate_transitivity()
-            print("DEBUG: known_equalities: ", self.known_equalities)
-            print("DEBUG: known_inequalities: ", self.known_inequalities)
-            print("DEBUG: class_values: ", self.class_values)
 
         for kind, item in ordered:
             if kind == 'axiom':
@@ -37,12 +55,15 @@ class Validator:
             elif kind == 'proof':
                 self.process_statement(item, is_hypothesis=False)
                 self.propagate_transitivity()
+            elif kind == 'operation':
+                #print(item)
+                t = self.normalize_comparison(item.left_type, item.operator, item.right_type)
+                self.operations[t] = (item.return_type, item.cases, item.attributes)
+            elif kind == 'type':
+                self.types[item] = item
 
         for stmt in proofs:
             self.process_statement(stmt, is_hypothesis=False)
-        print("DEBUG: known_equalities: ", self.known_equalities)
-        print("DEBUG: known_inequalities: ", self.known_inequalities)
-        print("DEBUG: class_values: ", self.class_values)
 
 
     def validate_theorem(self, theorem: TheoremDefinition):
@@ -406,7 +427,7 @@ class Validator:
             return name
         return re.sub(pattern, lambda m: bindings[m.group(0)], name)
 
-    def _check_defined(self, canon, line):
+    def _check_defined(self, canon, line, proof=False):
         """Return True if every named point in canon is in defined_objects, else append error."""
         for _, name in canon:
             try:
@@ -415,10 +436,12 @@ class Validator:
             except ValueError:
                 pass
             if not re.match(r'^[xyz]_\d+$', name):
-                norm = self.normalize_object(name)[3:] if name.startswith('ang') else self.normalize_object(name)
-                if not all(p in self.defined_objects for p in norm):
-                    self.errors.append(self._err(line, f"Object '{norm}' not defined"))
-                    return False
+                norm = self.normalize_object(name)
+                points = norm[3:] if norm.startswith('ang') else norm
+                for p in points:
+                    if p not in self.defined_objects:
+                        self.errors.append(self._err(line, f"Object '{norm}' not defined"))
+                        return False
         return True
 
     def _substitute_numeric_values(self, canon):
@@ -657,10 +680,12 @@ class Validator:
             left = self.substitute_variables(stmt.objects[0], bindings)
             right = self.substitute_variables(stmt.objects[1], bindings)
             return Statement(stmt.type, [left, right], line=stmt.line, goal=stmt.goal)
+
         elif stmt.type == 'assignment':
             left = self.substitute_variables(stmt.objects[0], bindings)
             right = self.substitute_variables(stmt.objects[1], bindings)
             return Statement(stmt.type, [left, right], line=stmt.line, goal=stmt.goal)
+
         elif stmt.type in ('sum_assignment', 'sum_equality'):
             new_objects = []
             for obj in stmt.objects:
@@ -669,7 +694,135 @@ class Validator:
                 else:
                     new_objects.append(self.substitute_variables(obj, bindings))
             return Statement(stmt.type, new_objects, line=stmt.line, goal=stmt.goal)
+
+        elif stmt.type == 'contains':
+            segment = self.substitute_variables(stmt.objects[0], bindings)
+            point = self.substitute_variables(stmt.objects[1], bindings)
+            return Statement(stmt.type, [segment, point], line=stmt.line, goal=stmt.goal)
+
+        elif stmt.type == 'greater_than':
+            left = self.substitute_variables(stmt.objects[0], bindings)
+            right = self.substitute_variables(stmt.objects[1], bindings)
+            return Statement(stmt.type, [left, right], line=stmt.line, goal=stmt.goal)
+
+        elif stmt.type == 'let':
+            obj = self.substitute_variables(stmt.objects[0], bindings)
+            return Statement(stmt.type, [obj], line=stmt.line, goal=stmt.goal)
+
+        elif stmt.type in ('true', 'false'):
+            return Statement(stmt.type, stmt.objects, line=stmt.line, goal=stmt.goal)
+
         return stmt
+
+    def call_extern(self, extern_name: str, left_value, right_value, line, ret_type):
+        """Call an external function by name"""
+        if extern_name in externs:
+            extern_func = externs[extern_name]
+            print(extern_name, left_value, right_value, type(left_value), type(right_value))
+            res = extern_func(left_value, right_value)
+            print(res)
+            if res is True: res='true'
+            if res is False: res='false'
+            return ret_type, res
+        else:
+            self.errors.append(
+                self._err(line, f"Unknown external function '{extern_name}'"))
+            return None
+
+    def solve_expression(self, expression, make_true:bool=False) -> Expression| Tuple[str, any]| None:
+        print(expression)
+        if expression.operator == 'pass':
+            return 'Bool', 'true'
+        if type(expression.left) == Expression:
+            expression.left = self.solve_expression(expression.left, make_true)
+        if type(expression.right) == Expression:
+            expression.right = self.solve_expression(expression.right, make_true)
+
+        left = expression.left
+        right = expression.right
+        operator = expression.operator
+        expr = expression
+
+        if left is None or right is None:
+            return None
+
+        if left[0] == 'VARIABLE':
+            l_type = self.variables[left[1]][0]
+            left_value = self.variables[left[1]][1]
+        else:
+            if operator == 'ASSIGN':
+                self.errors.append(self._err(expr.line, f"Can't assign to literal {left[1]}."))
+                return None
+            l_type = left[0].capitalize()
+            if left[0].upper().startswith('LIT'):
+                l_type = l_type[3:].capitalize()
+            left_value = left[1]
+
+        print(left, right)
+
+
+        if right[0] == 'VARIABLE':
+            r_type = self.variables[right[1]][0]
+            right_value = self.variables[right[1]][1]
+        else:
+            r_type = right[0].capitalize()
+            if right[0].upper().startswith('LIT'):
+                r_type = r_type[3:].capitalize()
+            right_value = right[1]
+
+        print(left, right)
+
+        if operator == 'ASSIGN':
+            if self.operations.get((l_type, operator, r_type)) is None and l_type!=r_type:
+                self.errors.append(
+                    self._err(expr.line, f"Cannot assign {r_type} to {l_type}"))
+                return None
+            if make_true:
+                self.variables[left[1]][1] = right_value
+            return 'Bool', 'true'
+        elif operator == 'EQUALS':
+            t = self.normalize_comparison(l_type, operator, r_type)
+            op_def = self.operations.get(t)
+            if op_def is None:
+                self.errors.append(
+                    self._err(expr.line, f"Operator {operator} is not defined for {l_type} and {r_type}"))
+                return None
+            else:
+                if op_def[2]:
+                    extern_name = op_def[2]['extern'][0]
+                    result = self.call_extern(extern_name, left_value, right_value, expr.line, op_def[0])
+                else:
+                    self.errors.append(
+                        self._err(expr.line, f"Temporary error"))
+                    return None
+
+                if not result:
+                    self.errors.append(
+                        self._err(expr.line, f"{left} does not equal {right}"))
+                    return None
+
+        else:
+            t = self.normalize_comparison(l_type, operator, r_type)
+            op_def = self.operations.get(t)
+
+            if op_def is None:
+                self.errors.append(
+                    self._err(expr.line, f"Operator {operator} is not defined for {l_type} and {r_type}"))
+                return None
+            else:
+                if op_def[2]:
+                    extern_name = op_def[2]['extern'][0]
+                    result = self.call_extern(extern_name, left_value, right_value, expr.line, op_def[0])
+                else:
+                    self.errors.append(
+                        self._err(expr.line, f"Temporary error"))
+                    return None
+
+                if not result:
+                    self.errors.append(
+                        self._err(expr.line, f"{left} does not equal {right}"))
+                    return None
+        return result
 
     def process_statement(self, stmt: Statement, is_hypothesis: bool):
         make_true = is_hypothesis or (stmt.in_let and not self.last_let_failed)
@@ -680,14 +833,26 @@ class Validator:
             return
 
         if stmt.type == 'let':
-            for p in list(stmt.objects[0]):
-                if not is_hypothesis and p in self.defined_objects:
-                    self.errors.append(self._err(stmt.line, f"Point '{p}' already defined"))
-                    self.last_let_failed = True
-                    return
+            self.last_let_failed = False
+            points = list(stmt.objects[0])
+            all_defined = all(p in self.defined_objects for p in points)
+            none_in_proof = not any(p in self.proof_defined_objects for p in points)
+            if not is_hypothesis and all_defined and none_in_proof:
+                self.errors.append(
+                    self._err(stmt.line, f"'{stmt.objects[0]}' is already fully defined in the hypothesis"))
+                self.last_let_failed = True
+                return
+            for p in points:
                 self.defined_objects.add(p)
-                self.last_let_failed = False
+                if not is_hypothesis:
+                    self.proof_defined_objects.add(p)
             return
+
+        if stmt.type == 'typehint':
+            variable = stmt.objects[0]
+            o_type = stmt.objects[1]
+
+            self.variables[variable] = [o_type, None]
 
         if stmt.type == 'chain_conclusion':
             left_ops, right_ops, right_type, right_val = stmt.objects
@@ -712,7 +877,7 @@ class Validator:
         if stmt.type == 'contains':
             segment = stmt.objects[0]
             point = stmt.objects[1]
-            if is_hypothesis:
+            if make_true:
                 self.known_contains.add((segment, point))
             else:
                 if (segment, point) not in self.known_contains and point not in segment:
@@ -773,6 +938,18 @@ class Validator:
             print(stmt.objects[0])
             return
 
+        if stmt.type == 'expression':
+            res = self.solve_expression(stmt.objects[0], make_true)
+            if res is not None:
+                if res[0] == 'Bool':
+                    if make_true:
+                        if res[1] == 'false':
+                            self.contradictory = True
+                    else:
+                        if res[1] == 'false':
+                            self.errors.append(self._err(stmt.line,
+                                                         f"'{stmt.objects[1]}' is false"))
+
         if stmt.type == 'true':
             if make_true:
                 if not stmt.goal:
@@ -782,11 +959,149 @@ class Validator:
                     self.errors.append(self._err(stmt.line, f"'{stmt.objects} is {'false' if stmt.objects == 'true' else 'true'}' was disproven"))
             return
 
+    def _build_bindings(self, axiom, raw_args):
+        from itertools import permutations, product
+
+        obj_args = raw_args[:len(axiom.let_objects)]
+        num_args = raw_args[len(axiom.let_objects):]
+
+        # Generate all permutations for each provided object
+        perm_lists = [[''.join(p) for p in permutations(obj)] for obj in obj_args]
+
+        for combo in product(*perm_lists):
+            bindings = self._try_build_bindings(axiom, list(combo), num_args)
+            if bindings is not None and self._check_bindings(axiom, bindings):
+                print(f"DEBUG _build_bindings: found binding {bindings} for combo {combo} ({axiom.name})")
+                return bindings
+
+        return None
+
+    def _try_build_bindings(self, axiom, obj_args, num_args):
+        parent = {}
+
+        def find(x):
+            if x not in parent:
+                parent[x] = x
+            if parent[x] != x:
+                parent[x] = find(parent[x])
+            return parent[x]
+
+        def union(x, y):
+            px, py = find(x), find(y)
+            if px != py:
+                parent[px] = py
+
+        axiom_to_provided = {}
+        for axiom_obj, provided_obj in zip(axiom.let_objects, obj_args):
+            for axiom_char, provided_char in zip(axiom_obj, provided_obj):
+                if axiom_char in axiom_to_provided:
+                    union(axiom_to_provided[axiom_char], provided_char)
+                else:
+                    axiom_to_provided[axiom_char] = provided_char
+
+        bindings = {axiom_char: find(provided_char) for axiom_char, provided_char in axiom_to_provided.items()}
+        for numvar, provided_num in zip(axiom.let_numvars, num_args):
+            bindings[numvar] = provided_num
+
+        return bindings
+
+    def _check_bindings(self, axiom, bindings):
+        """Check if bindings satisfy all given conditions. Returns True if all pass."""
+        for hyp in axiom.given.statements:
+            if hyp.type == 'let':
+                obj = hyp.objects[0]
+                if obj in bindings:
+                    concrete = bindings[obj]
+                    if not all(p in self.defined_objects for p in concrete):
+                        return False
+
+            elif hyp.type == 'let_numvar':
+                continue
+
+            elif hyp.type == 'equality':
+                left = self.normalize_object(self.substitute_variables(hyp.objects[0], bindings))
+                right = self.normalize_object(self.substitute_variables(hyp.objects[1], bindings))
+                if hyp.goal:
+                    if not any(left in eq and right in eq for eq in self.known_equalities):
+                        return False
+                else:
+                    if not any(left in eq and right in eq for eq in self.known_inequalities):
+                        return False
+
+            elif hyp.type == 'inequality':
+                left = self.normalize_object(self.substitute_variables(hyp.objects[0], bindings))
+                right = self.normalize_object(self.substitute_variables(hyp.objects[1], bindings))
+                if not any(left in iq and right in iq for iq in self.known_inequalities):
+                    return False
+
+            elif hyp.type == 'assignment':
+                left = self.normalize_object(self.substitute_variables(hyp.objects[0], bindings))
+                expected = float(self.substitute_variables(hyp.objects[1], bindings))
+                cls = next((eq for eq in self.known_equalities if left in eq), None)
+                if self.class_values.get(cls) != expected:
+                    return False
+
+            elif hyp.type == 'sum_assignment':
+                raw_ops = hyp.objects[0]
+                concrete = [(s, self.substitute_variables(n, bindings)) for s, n in raw_ops]
+                concrete = self._substitute_numeric_values(concrete)
+                canon = self.normalize_signed_sum(concrete)
+                expected = float(self.substitute_variables(hyp.objects[1], bindings))
+                numeric, sym = self._split_numeric_symbolic(canon)
+                net = expected - numeric
+                if not sym:
+                    if numeric != expected:
+                        return False
+                else:
+                    key = tuple(sym)
+                    cls = self._find_sum_class(key)
+                    if self.class_values.get(cls) != net:
+                        return False
+
+            elif hyp.type == 'sum_equality':
+                raw_left, raw_right = hyp.objects[0], hyp.objects[1]
+                left_concrete = [(s, self.substitute_variables(n, bindings)) for s, n in raw_left]
+                right_concrete = [(s, self.substitute_variables(n, bindings)) for s, n in raw_right]
+                left_concrete = self._substitute_numeric_values(left_concrete)
+                right_concrete = self._substitute_numeric_values(right_concrete)
+                left_norm = self.normalize_signed_sum(left_concrete)
+                right_norm = self.normalize_signed_sum(right_concrete)
+                left_num, left_sym = self._split_numeric_symbolic(left_norm)
+                right_num, right_sym = self._split_numeric_symbolic(right_norm)
+                net_numeric = right_num - left_num
+                flipped = [('+' if s == '-' else '-', n) for s, n in right_sym]
+                combined_sym = tuple(sorted(tuple(left_sym) + tuple(flipped)))
+                if not combined_sym:
+                    if net_numeric != 0.0:
+                        return False
+                else:
+                    cls = self._find_sum_class(combined_sym)
+                    val = self.class_values.get(cls)
+                    same_class = False
+                    if net_numeric == 0.0:
+                        lc = self._find_sum_class(tuple(left_sym))
+                        rc = self._find_sum_class(tuple(right_sym))
+                        same_class = (lc is not None and lc == rc)
+                    if not same_class and (val is None or val != net_numeric):
+                        return False
+
+            elif hyp.type == 'contains':
+                left = self.normalize_object(self.substitute_variables(hyp.objects[0], bindings))
+                right = self.substitute_variables(hyp.objects[1], bindings)
+                if (left, right) not in self.known_contains:
+                    return False
+
+            elif hyp.type in ('true', 'false'):
+                if hyp.type == 'true' and not hyp.goal:
+                    return False
+                if hyp.type == 'false' and hyp.goal:
+                    return False
+
+        return True
 
     def apply_axiom(self, stmt: Statement):
         axiom_name = stmt.objects[0]
-        raw_args   = eval(stmt.value)
-        raw_args = [self.normalize_object(a) for a in raw_args]
+        raw_args = eval(stmt.value)
         line = stmt.line
 
         if axiom_name not in self.axioms:
@@ -801,22 +1116,13 @@ class Validator:
                                          f"and {len(axiom.let_numvars)} numvar(s), got {len(raw_args)}"))
             return False
 
-        a_binds = []
-        p_binds = []
-        for axiom_obj, provided_obj in zip(axiom.let_objects, raw_args[:len(axiom.let_objects)]):
-            axiom_obj, provided_obj = self.normalize_object(axiom_obj), self.normalize_object(provided_obj)
-            for axiom_char in axiom_obj:
-                if axiom_char not in a_binds:
-                    a_binds.append(axiom_char)
-            for provided_char in provided_obj:
-                if provided_char not in p_binds:
-                    p_binds.append(provided_char)
+        bindings = self._build_bindings(axiom, raw_args)
+        if bindings is None:
+            self.errors.append(self._err(line,
+                                         f"Axiom '{axiom_name}': no valid binding found for {raw_args}, conditions not satisfied"))
+            return False
 
-        bindings = dict(zip(a_binds, p_binds))
-
-        for numvar, provided_num in zip(axiom.let_numvars, raw_args[len(axiom.let_objects):]):
-            bindings[numvar] = provided_num
-
+        # Resolve numvars to concrete floats
         for numvar in axiom.let_numvars:
             raw = bindings.get(numvar)
             if raw is None:
@@ -827,118 +1133,6 @@ class Validator:
                 self.errors.append(self._err(line, f"Cannot resolve numeric value for '{raw}' bound to '{numvar}'"))
                 return False
             bindings[numvar] = str(int(resolved)) if resolved == int(resolved) else str(resolved)
-
-        declared_points = {p for obj in axiom.let_objects for p in obj}
-        for s in list(axiom.given.statements) + axiom.then:
-            if s.type in ('assignment', 'sum_assignment', 'sum_equality', 'let_numvar', 'true'):
-                continue
-            for obj in s.objects:
-                if isinstance(obj, list):
-                    continue
-                raw = obj[3:] if obj.startswith('ang') else obj
-                if not raw:
-                    continue
-                for point in raw:
-                    if point not in declared_points and not re.match(r'^[xyz]_\d+$', raw):
-                        self.errors.append(f"Axiom '{axiom_name}': point '{point}' in '{raw}' not declared")
-                        return False
-
-        def concretize(operands):
-            """(sign, name) list > substitute bindings > substitute numeric values."""
-            with_bindings = [(s, self.substitute_variables(n, bindings)) for s, n in operands]
-            return self._substitute_numeric_values(with_bindings)
-
-        for hyp in axiom.given.statements:
-            if hyp.type == 'let':
-                obj = hyp.objects[0]
-                if obj in bindings:
-                    concrete = bindings[obj]
-                    if not all(p in self.defined_objects for p in concrete):
-                        self.errors.append(self._err(line, f"Axiom '{axiom_name}': object '{concrete}' not defined"))
-                        return False
-
-            elif hyp.type == 'let_numvar':
-                continue
-
-            elif hyp.type == 'equality':
-                left = self.normalize_object(self.substitute_variables(hyp.objects[0], bindings))
-                right = self.normalize_object(self.substitute_variables(hyp.objects[1], bindings))
-                if not any(left in eq and right in eq for eq in (self.known_equalities if hyp.goal else self.known_inequalities)):
-                    self.errors.append(
-                        self._err(line, f"Axiom '{axiom_name}': condition '{left} = {right} is {'true' if hyp.goal else 'false'}' not satisfied"))
-                    return False
-
-            elif hyp.type == 'contains':
-                left = self.normalize_object(self.substitute_variables(hyp.objects[0], bindings))
-                right = self.normalize_object(self.substitute_variables(hyp.objects[1], bindings))
-                if (left, right) not in self.known_contains and right not in left:
-                    self.errors.append(
-                        self._err(line, f"Axiom '{axiom_name}': condition '{left} contains {right}' not satisfied"))
-                    return False
-
-            elif hyp.type == 'assignment':
-                left = self.normalize_object(self.substitute_variables(hyp.objects[0], bindings))
-                expected = float(self.substitute_variables(hyp.objects[1], bindings))
-                cls = self._find_sum_class(left)
-                if self.class_values.get(cls) != expected:
-                    self.errors.append(
-                        self._err(line, f"Axiom '{axiom_name}': condition '{left} = {expected}' not satisfied"))
-                    return False
-
-            elif hyp.type == 'sum_assignment':
-                raw_ops = hyp.objects[0]
-                concrete = concretize(raw_ops)
-                canon = self.normalize_signed_sum(concrete)
-                expected = float(self.substitute_variables(hyp.objects[1], bindings))
-
-                numeric, sym = self._split_numeric_symbolic(canon)
-                net = expected - numeric  # what the symbolic part must equal
-
-                if not sym:
-                    if numeric != expected:
-                        self.errors.append(
-                            self._err(line, f"Axiom '{axiom_name}': condition '{canon} = {expected}' not satisfied"))
-                        return False
-                else:
-                    key = tuple(sym)
-                    cls = self._find_sum_class(key)
-                    if self.class_values.get(cls) != net:
-                        self.errors.append(
-                            self._err(line, f"Axiom '{axiom_name}': condition '{key} = {net}' not satisfied"))
-                        return False
-
-            elif hyp.type == 'sum_equality':
-                left_concrete = concretize(hyp.objects[0])
-                right_concrete = concretize(hyp.objects[1])
-                left_norm = self.normalize_signed_sum(left_concrete)
-                right_norm = self.normalize_signed_sum(right_concrete)
-
-                left_num, left_sym = self._split_numeric_symbolic(left_norm)
-                right_num, right_sym = self._split_numeric_symbolic(right_norm)
-                net_numeric = right_num - left_num
-
-                flipped = [('+' if s == '-' else '-', n) for s, n in right_sym]
-                combined_sym = tuple(left_sym) + tuple(flipped)
-
-                if not combined_sym:
-                    if net_numeric != 0.0:
-                        self.errors.append(self._err(line, f"Axiom '{axiom_name}': numeric conflict in condition"))
-                        return False
-                else:
-                    cls = self._find_sum_class(combined_sym)
-                    val = self.class_values.get(cls)
-                    same_class = False
-                    if net_numeric == 0.0:
-                        lc = self._find_sum_class(tuple(left_sym))
-                        rc = self._find_sum_class(tuple(right_sym))
-                        same_class = (lc is not None and lc == rc)
-                    if not same_class and (val is None or val != net_numeric):
-                        self.errors.append(self._err(line, f"Axiom '{axiom_name}': condition not satisfied"))
-                        return False
-
-            elif hyp.type == 'true':
-                if not hyp.goal:
-                    return True
 
         for thesis in axiom.then:
             concrete_stmt = self._concretize_statement(thesis, bindings)

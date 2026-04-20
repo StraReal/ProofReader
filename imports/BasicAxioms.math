@@ -1,4 +1,4 @@
-axiom SideAngleSideCongruence:
+axiom SAS:
     Given:
         let ABC
         let DEF
@@ -27,9 +27,9 @@ axiom CorrespondingPartsCongruent:
         AB = DE
         BC = EF
         CA = FD
-        angCAB = angFDE
+        angBAC = angEDF
         angABC = angDEF
-        angBCA = angEFD
+        angBCA = angDFE
 
 axiom AngleSum:
     Given:
@@ -59,3 +59,63 @@ axiom PointCollapse:
         AG = 0
     Then:
         A = G
+
+axiom PointOnRay:
+    Given:
+        let ABC
+        let D
+        D in AB
+    Then:
+        angDBC = angABC
+
+axiom RayUniqueness:
+    Given:
+        let ABC
+        let D
+        D in AB
+        angDCB = angACB
+    Then:
+        A = D
+
+axiom PointSubstitution:
+    Given:
+        let A
+        let B
+        let M
+        A = B
+    Then:
+        AM = MB
+
+theorem ASA:
+    Given:
+        let ABC
+        let DEF
+        angABC = angDEF
+        BC = EF
+        angBCA = angEFD
+    Then:
+        ABC = DEF
+    Proof:
+        let G in AB
+        let BG = DE
+
+        PointOnRay{ABC G} => angGBC = angABC
+
+        angGBC = angABC = angDEF
+
+        SAS{GBC DEF} => GBC = DEF
+        CorrespondingPartsCongruent{GBC DEF} => GC = DF
+        CorrespondingPartsCongruent{GBC DEF} => angBCG = angEFD
+        CorrespondingPartsCongruent{GBC DEF} => angBGC = angEDF
+
+        angBCG = angEFD = angBCA
+
+        # angBCG = angBCA means G is on ray CA, but G is also on AB
+        RayUniqueness{ABC G} => A = G
+        # G = A, meaning BG = BA = AB = DE
+        PointSubstitution{A G B} => AB = BG
+        BG = AB = DE
+
+        # Now we have AB = DE, BC = EF, angABC = angDEF
+        # Apply SAS to get full congruence
+        SAS{ABC DEF} => ABC = DEF
