@@ -728,7 +728,6 @@ class Validator:
             return None
 
     def solve_expression(self, expression, make_true:bool=False) -> Expression| Tuple[str, any]| None:
-        print(expression)
         if expression.operator == 'pass':
             return 'Bool', 'true'
         if type(expression.left) == Expression:
@@ -745,8 +744,12 @@ class Validator:
             return None
 
         if left[0] == 'VARIABLE':
-            l_type = self.variables[left[1]][0]
-            left_value = self.variables[left[1]][1]
+            l_var = self.variables.get(left[1])
+            if l_var is None:
+                self.errors.append(self._err(expr.line, f"Undefined variable '{left[1]}'."))
+                return None
+            l_type = l_var[0]
+            left_value = l_var[1]
         else:
             if operator == 'ASSIGN':
                 self.errors.append(self._err(expr.line, f"Can't assign to literal {left[1]}."))
@@ -756,12 +759,14 @@ class Validator:
                 l_type = l_type[3:].capitalize()
             left_value = left[1]
 
-        print(left, right)
-
 
         if right[0] == 'VARIABLE':
-            r_type = self.variables[right[1]][0]
-            right_value = self.variables[right[1]][1]
+            r_var = self.variables.get(right[1])
+            if r_var is None:
+                self.errors.append(self._err(expr.line, f"Undefined variable '{right[1]}'."))
+                return None
+            r_type = r_var[0]
+            right_value = r_var[1]
         else:
             r_type = right[0].capitalize()
             if right[0].upper().startswith('LIT'):
@@ -957,15 +962,6 @@ class Validator:
                         if res[1] == 'false':
                             self.errors.append(self._err(stmt.line,
                                                          f"'{stmt.objects[1]}' is false"))
-
-        if stmt.type == 'true':
-            if make_true:
-                if not stmt.goal:
-                    self.contradictory = True
-            else:
-                if not stmt.goal:
-                    self.errors.append(self._err(stmt.line, f"'{stmt.objects} is {'false' if stmt.objects == 'true' else 'true'}' was disproven"))
-            return
 
     def _build_bindings(self, axiom, raw_args):
         from itertools import permutations, product

@@ -10,35 +10,36 @@ axiom SideSwitching:
 type Nat
 type Bool
 type Int
+type String
 
 # nat and int
-@[extern int_add]
+@[extern add]
 operation Int + Int -> Int
 
-@[extern int_add]
+@[extern add]
 operation Int + Nat -> Int
 
-@[extern int_add]
+@[extern add]
 operation Nat + Nat -> Nat
 
 
-@[extern int_mul]
+@[extern mul]
 operation Nat * Nat -> Nat
 
-@[extern int_mul]
+@[extern mul]
 operation Int * Nat -> Int
 
-@[extern int_mul]
+@[extern mul]
 operation Int * Int -> Int
 
 
-@[extern int_sub]
+@[extern sub]
 operation Nat - Nat -> Int
 
-@[extern int_sub]
+@[extern sub]
 operation Int - Nat -> Int
 
-@[extern int_sub]
+@[extern sub]
 operation Int - Int -> Int
 
 @[extern eq_comp]

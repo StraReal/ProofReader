@@ -21,6 +21,7 @@ class Parser:
         self.operations = {}
         self.types = {}
         self.pending_attributes = {}
+        self.last_precolon = None
 
     def current(self) -> Token:
         return self.tokens[self.pos] if self.pos < len(self.tokens) else self.tokens[-1]
@@ -83,11 +84,9 @@ class Parser:
         return self.axioms, self.theorems, hypothesis, proofs, [], ordered
 
     def parse_hypothesis_block(self, stop_tokens: List[str] = None) -> HypothesisBlock:
-        if stop_tokens is None:
-            stop_tokens = ['PROOF', 'EOF']
 
         statements = []
-        while self.current().type not in stop_tokens:
+        while self.current().type != 'DEDENT':
             stmt = self.parse_statement()
             if stmt:
                 statements.extend(stmt)
@@ -96,36 +95,62 @@ class Parser:
     def parse_axiom(self) -> AxiomDefinition:
         self.advance()  # skip 'axiom'
 
+        self.last_precolon = self.current().type
         line = self.current().line_num
         if self.current().type != 'VARIABLE':
             print_error(line, f"Syntax Error: Expected axiom name", self.import_map)
             sys.exit(1)
         name = self.current().value
-        self.advance()
 
+        self.advance()
         if self.current().type != 'COLON':
-            print_error(line, "Syntax Error: Expected ':' after axiom name", self.import_map)
+            print_error(line, f"Syntax Error: Expected colon after '{self.last_precolon}'", self.import_map)
+        self.advance()
+        if self.current().type == 'NEWLINE':
+            self.advance()
+        if self.current().type != 'INDENT':
+            print_error(line, f"Syntax Error: Expected indented block after '{self.last_precolon}'", self.import_map)
             sys.exit(1)
         self.advance()
 
         if self.current().type != 'GIVEN':
             print_error(line, "Syntax Error: Expected 'Given' in axiom", self.import_map)
             sys.exit(1)
-        self.advance()
-        if self.current().type == 'COLON':
-            self.advance()
 
-        given = self.parse_hypothesis_block(stop_tokens=['THEN'])
+        self.last_precolon = self.current().type
+        self.advance()
+        if self.current().type != 'COLON':
+            print_error(line, f"Syntax Error: Expected colon after '{self.last_precolon}'", self.import_map)
+            sys.exit(1)
+        self.advance()
+        if self.current().type == 'NEWLINE':
+            self.advance()
+        if self.current().type != 'INDENT':
+            print_error(line, f"Syntax Error: Expected indented block after '{self.last_precolon}'", self.import_map)
+            sys.exit(1)
+        self.advance()
+
+        given = self.parse_hypothesis_block(stop_tokens=['DEDENT'])
+        self.advance()
 
         if self.current().type != 'THEN':
             print_error(line, "Syntax Error: Expected 'Then' in axiom", self.import_map)
             sys.exit(1)
+
+        self.last_precolon = self.current().type
         self.advance()
-        if self.current().type == 'COLON':
+        if self.current().type != 'COLON':
+            print_error(line, f"Syntax Error: Expected colon after '{self.last_precolon}'", self.import_map)
+        self.advance()
+        if self.current().type == 'NEWLINE':
             self.advance()
+        if self.current().type != 'INDENT':
+            print_error(line, f"Syntax Error: Expected indented block after '{self.last_precolon}'", self.import_map)
+            sys.exit(1)
+        self.advance()
 
         then_statements = []
-        while self.current().type not in ('PROOF', 'AXIOM', 'THEOREM', 'TYPE','OPERATION','HYPOTHESIS', 'EOF', 'AT'):
+        while self.current().type != 'DEDENT':
             stmts = self.parse_statement()
             if stmts:
                 then_statements.extend(stmts)
@@ -148,32 +173,54 @@ class Parser:
             print_error(line, "Syntax Error: Expected theorem name", self.import_map)
             sys.exit(1)
         name = self.current().value
-        self.advance()
 
+        self.last_precolon = self.current().type
+        self.advance()
         if self.current().type != 'COLON':
-            print_error(line, "Syntax Error: Expected theorem name", self.import_map)
-            print("Syntax Error: Expected ':' after theorem name")
+            print_error(line, f"Syntax Error: Expected colon after '{self.last_precolon}'", self.import_map)
+        self.advance()
+        if self.current().type == 'NEWLINE':
+            self.advance()
+        if self.current().type != 'INDENT':
+            print_error(line, f"Syntax Error: Expected indented block after '{self.last_precolon}'", self.import_map)
             sys.exit(1)
         self.advance()
 
         if self.current().type != 'GIVEN':
             print_error(line, "Syntax Error: Expected 'Given' in theorem", self.import_map)
             sys.exit(1)
+
+        self.last_precolon = self.current().type
         self.advance()
-        if self.current().type == 'COLON':
+        if self.current().type != 'COLON':
+            print_error(line, f"Syntax Error: Expected colon after '{self.last_precolon}'", self.import_map)
+        self.advance()
+        if self.current().type == 'NEWLINE':
             self.advance()
+        if self.current().type != 'INDENT':
+            print_error(line, f"Syntax Error: Expected indented block after '{self.last_precolon}'", self.import_map)
+            sys.exit(1)
+        self.advance()
 
-        given = self.parse_hypothesis_block(stop_tokens=['THEN'])
-
+        given = self.parse_hypothesis_block(stop_tokens=['DEDENT'])
+        self.advance()
         if self.current().type != 'THEN':
             print_error(line, "Syntax Error: Expected 'Then' in theorem", self.import_map)
             sys.exit(1)
+        self.last_precolon = self.current().type
         self.advance()
-        if self.current().type == 'COLON':
+        if self.current().type != 'COLON':
+            print_error(line, f"Syntax Error: Expected colon after '{self.last_precolon}'", self.import_map)
+        self.advance()
+        if self.current().type == 'NEWLINE':
             self.advance()
+        if self.current().type != 'INDENT':
+            print_error(line, f"Syntax Error: Expected indented block after '{self.last_precolon}'", self.import_map)
+            sys.exit(1)
+        self.advance()
 
         then_statements = []
-        while self.current().type not in ('PROOF', 'AXIOM', 'THEOREM', 'TYPE','OPERATION','HYPOTHESIS', 'EOF', 'AT'):
+        while self.current().type != 'DEDENT':
             stmts = self.parse_statement()
             if stmts:
                 then_statements.extend(stmts)
@@ -273,7 +320,7 @@ class Parser:
         constructors = []
         if self.current().type == 'COLON':
             self.advance()
-            while self.current().type not in ('EOF', 'OPERATION', 'TYPE', 'THEOREM', 'AXIOM', 'HYPOTHESIS'):
+            while self.current().type != 'DEDENT':
                 if self.current().type == 'VARIABLE':
                     constructor_name = self.current().value
                     self.advance()
@@ -455,7 +502,7 @@ class Parser:
             if self.current().type == 'LET':
                 self.advance()
                 self.advance()
-                if self.current().type != 'COLON':
+                if self.current().type not in ('COLON','BE'):
                     print_error(line, f"Syntax Error: must define variable type: {left_obj}",
                                 self.import_map)
                     sys.exit(1)

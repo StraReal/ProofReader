@@ -1,4 +1,4 @@
-axiom SAS:
+axiom SiAnSi:
     Given:
         let ABC
         let DEF
@@ -86,7 +86,7 @@ axiom PointSubstitution:
     Then:
         AM = MB
 
-theorem ASA:
+theorem AnSiAn:
     Given:
         let ABC
         let DEF

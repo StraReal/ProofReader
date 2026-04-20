@@ -27,6 +27,7 @@ simple_keywords = { #require space or end
     '->': 'ARROW_TYPE',
     'type': 'TYPE',
     'is congruent to': 'EQUALS',
+    'be': 'BE'
     #'validate_assignment': 'VALIDATE_ASSIGNMENT',
 }
 
@@ -35,6 +36,8 @@ colon_keywords = {
     'Given': 'GIVEN',
     'Hypothesis': 'HYPOTHESIS',
     'Proof': 'PROOF',
+    'if': 'IF',
+    'else': 'ELSE',
 }
 
 nonwhitespace_keywords = {
@@ -113,23 +116,54 @@ def check_balanced(code: str, import_map: dict):
         print_error(opener_line, f"Unclosed '{opener}'", import_map)
         sys.exit(1)
 
+
+def calculate_indentation(line: str, tab_width: int = 4) -> int:
+    indent = 0
+    for char in line:
+        if char == ' ':
+            indent += 1
+        elif char == '\t':
+            indent += tab_width - (indent % tab_width)
+        else:
+            break
+    return indent
+
+indent_stack = [0]
+tab_width = 4
 #lexer
 def tokenize(code: str, import_map: dict) -> List[Token]:
     tokens = []
     lines = code.split('\n')
 
     for line_num, line in enumerate(lines, 1):
+
+        current_indent = calculate_indentation(line, tab_width)
+        if current_indent > indent_stack[-1]:
+            indent_stack.append(current_indent)
+            tokens.append(Token('INDENT', '', line_num, line))
+
+        elif current_indent < indent_stack[-1]:
+            while len(indent_stack) > 1 and indent_stack[-1] > current_indent:
+                indent_stack.pop()
+                tokens.append(Token('DEDENT', '', line_num, line))
+
+            if indent_stack[-1] != current_indent:
+                print_error(line_num, f"Syntax Error: Indentation doesn't match any previous level", import_map)
+                sys.exit(1)
+
         pos = 0
         while pos < len(line):
             if line[pos:].startswith('#'):
                 break
+
             elif line[pos].isspace():
                 pos += 1
                 continue
+
             matched = False
             op_matched = False
 
-            for keyword, token_type in literals.items():
+            for keyword, token_type in sorted(literals.items(), key=len, reverse=True):
                 if line[pos:].startswith(keyword):
                     end_pos = pos + len(keyword)
                     if end_pos >= len(line):
@@ -146,26 +180,27 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
             if matched:
                 continue
 
-            for keyword, token_type in colon_keywords.items():
+            for keyword, token_type in sorted(colon_keywords.items(), key=len, reverse=True):
                 if line[pos:].startswith(keyword):
                     colon = False
+                    l=0
                     while pos < len(line):
                         if line[pos] == ':':
                             colon = True
                             break
+                        l+=1
                         pos += 1
                     if not colon:
                         print_error(line_num, f"Syntax Error: Missing colon in front of {keyword}", import_map)
                         sys.exit(1)
                     tokens.append(Token(token_type, keyword, line_num, line))
-                    pos += len(keyword)
                     matched = True
                     break
             if matched:
                 continue
 
 
-            for keyword, token_type in simple_keywords.items():
+            for keyword, token_type in sorted(simple_keywords.items(), key=len, reverse=True):
                 if line[pos:].startswith(keyword):
                     end_pos = pos + len(keyword)
                     if end_pos >= len(line):
@@ -248,7 +283,7 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
                 if not closed:
                     print_error(line_num, f"Syntax Error: Unclosed quotes.",import_map)
                     sys.exit(1)
-                tokens.append(Token('STRING', string, line_num, line))
+                tokens.append(Token('LITSTRING', string, line_num, line))
                 pos += 1
                 continue
 
@@ -289,6 +324,10 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
                 print_error(line_num, f"Syntax Error: Invalid character '{line[pos]}'", import_map)
                 sys.exit(1)
 
+    while len(indent_stack) > 1:
+        indent_stack.pop()
+        tokens.append(Token('DEDENT', '', len(lines), ''))
+
     tokens.append(Token('EOF', '', len(lines), ''))
     return tokens
 
@@ -310,6 +349,7 @@ while True:
     import_map = {i + 1: file_tracker[i] for i in range(len(file_tracker))}
     check_balanced(code, import_map)
     tokens = tokenize(code, import_map)
+    print(tokens)
     parser = Parser(tokens, import_map)
     axioms, theorems, hypothesis, proofs, to_import, ordered = parser.parse()
 
