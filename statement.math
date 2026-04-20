@@ -6,12 +6,14 @@ Hypothesis:
     let b : Nat = 6
     let c : Nat = 2
     let d : Nat = 1
+    let x : Int
     let ABC
     let DEF
     ABC = DEF
     let truevar : Bool = true
 
 Proof:
+    x equals b
     ABC equals DEF
     truevar equals true
     a + d equals b
