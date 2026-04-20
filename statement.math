@@ -13,7 +13,4 @@ Hypothesis:
     let truevar : Bool = true
 
 Proof:
-    x equals b
-    ABC equals DEF
-    truevar equals true
-    a + d equals b
+    a is congruent to b - 1

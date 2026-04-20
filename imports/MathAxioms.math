@@ -11,7 +11,6 @@ type Nat
 type Bool
 type Int
 
-
 # nat and int
 @[extern int_add]
 operation Int + Int -> Int
@@ -42,8 +41,6 @@ operation Int - Nat -> Int
 @[extern int_sub]
 operation Int - Int -> Int
 
-@[extern int_comp]
-operation Nat equals Nat -> Bool
+@[extern eq_comp]
+operation Int equals Nat -> Bool
 
-@[extern gen_eq_comp]
-operation Bool equals Bool -> Bool

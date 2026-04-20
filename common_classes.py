@@ -60,7 +60,7 @@ class TheoremDefinition:
 @dataclass
 class Token:
     type: str  # 'HYPOTHESIS', 'LET', 'IDENT', 'EQUALS', 'ANGLE', 'NUMBER', 'COLON', 'EOF'...
-    value: str
+    value: Any
     line_num: int
     line: str
 

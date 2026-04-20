@@ -26,6 +26,7 @@ simple_keywords = { #require space or end
     'operation': 'OPERATION',
     '->': 'ARROW_TYPE',
     'type': 'TYPE',
+    'is congruent to': 'EQUALS',
     #'validate_assignment': 'VALIDATE_ASSIGNMENT',
 }
 
@@ -63,8 +64,8 @@ operators = {
 }
 
 literals = {
-    'true': 'LITBOOL',
-    'false': 'LITBOOL'
+    'true': ('LITBOOL', bool),
+    'false': ('LITBOOL', bool)
 }
 
 def check_balanced(code: str, import_map: dict):
@@ -132,13 +133,13 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
                 if line[pos:].startswith(keyword):
                     end_pos = pos + len(keyword)
                     if end_pos >= len(line):
-                        tokens.append(Token(token_type, keyword, line_num, line))
+                        tokens.append(Token(token_type[0], token_type[1](keyword), line_num, line))
                         pos += len(keyword)
                         matched = True
                         break
                     if not line[end_pos].isspace():
                         continue
-                    tokens.append(Token(token_type, keyword, line_num, line))
+                    tokens.append(Token(token_type[0], token_type[1](keyword), line_num, line))
                     pos += len(keyword)
                     matched = True
                     break
@@ -251,6 +252,7 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
                 pos += 1
                 continue
 
+            #numbers
             elif line[pos].isdigit() or line[pos] == '-':
                 if line[pos] == '-':
                     negative = True
@@ -271,10 +273,13 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
 
                 if decimal:
                     num_type = 'LITFLOAT'
+                    num = float(num)
                 elif negative:
                     num_type = 'LITINT'
+                    num = int(num)
                 else:
                     num_type = 'LITNAT'
+                    num = int(num)
                 tokens.append(Token(num_type, num, line_num, line))
                 continue
 

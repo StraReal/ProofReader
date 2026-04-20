@@ -718,9 +718,7 @@ class Validator:
         """Call an external function by name"""
         if extern_name in externs:
             extern_func = externs[extern_name]
-            print(extern_name, left_value, right_value, type(left_value), type(right_value))
             res = extern_func(left_value, right_value)
-            print(res)
             if res is True: res='true'
             if res is False: res='false'
             return ret_type, res
@@ -770,7 +768,13 @@ class Validator:
                 r_type = r_type[3:].capitalize()
             right_value = right[1]
 
-        print(left, right)
+        if left_value is None or right_value is None:
+            if operator != 'ASSIGN':
+                both_unkn = left_value is None and right_value is None
+                given_str = (left[1] if left_value is None else '')+(', 'if both_unkn else '')+(right[1] if right_value is None else '')
+                self.errors.append(
+                        self._err(expr.line, f"Cannot calculate expressions with unknowns (given: {given_str})"))
+                return None
 
         if operator == 'ASSIGN':
             if self.operations.get((l_type, operator, r_type)) is None and l_type!=r_type:
@@ -784,9 +788,13 @@ class Validator:
             t = self.normalize_comparison(l_type, operator, r_type)
             op_def = self.operations.get(t)
             if op_def is None:
-                self.errors.append(
-                    self._err(expr.line, f"Operator {operator} is not defined for {l_type} and {r_type}"))
-                return None
+                if l_type==r_type:
+                    extern_name = 'eq_comp'
+                    result = self.call_extern(extern_name, left_value, right_value, expr.line, 'Bool')
+                else:
+                    self.errors.append(
+                        self._err(expr.line, f"Operator {operator} is not defined for {l_type} and {r_type}"))
+                    return None
             else:
                 if op_def[2]:
                     extern_name = op_def[2]['extern'][0]
