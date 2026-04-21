@@ -33,6 +33,44 @@ operation Int * Nat -> Int
 operation Int * Int -> Int
 
 
+@[extern exp]
+operation Nat ** Nat -> Nat
+
+@[extern exp]
+operation Int ** Nat -> Int
+
+@[extern exp]
+operation Int ** Int -> Int
+
+
+@[extern gt]
+operation Int > Int -> Bool
+
+@[extern lt]
+operation Int < Int -> Bool
+
+
+operation Int <= Int -> Bool
+    gives first < second or first equals second
+
+operation Int >= Int -> Bool
+    gives first > second or first equals second
+
+
+@[extern gt]
+operation Nat > Nat -> Bool
+
+@[extern lt]
+operation Nat < Nat -> Bool
+
+
+operation Nat <= Nat -> Bool
+    gives (first < second) or (first equals second)
+
+operation Nat >= Nat -> Bool
+    gives (first > second) or (first equals second)
+
+
 @[extern sub]
 operation Nat - Nat -> Int
 
@@ -44,6 +82,12 @@ operation Int - Int -> Int
 
 @[extern eq_comp]
 operation Int equals Nat -> Bool
+
+operation Int != Int -> Bool
+    gives not first equals second
+
+operation Nat != Nat -> Bool
+    gives not first equals second
 
 @[extern and]
 operation Bool and Bool -> Bool

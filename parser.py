@@ -4,11 +4,17 @@ from itertools import combinations
 attributes = {}
 OP_MAP = {  # Use https://docs.python.org/3/reference/expressions.html#operator-precedence for reference
             # TOKEN TYPE |      SYMBOL     | INFIX PREC,LEFT-ASS |  PREFIX PREC   | POSTFIX PREC
+            'EXPONENT':   Operator('**',     infix=(9, True)),
             'MULTIPLY':   Operator('*',      infix=(7, True)),
             'DIVIDE':     Operator('/',      infix=(7, True)),
             'PLUS':       Operator('+',      infix=(6, True)),
             'MINUS':      Operator('-',      infix=(6, True) ,        prefix=8),
+            'INEQUALS':   Operator('!=',     infix=(5, True)),
             'EQUALS':     Operator('equals', infix=(5, True)),
+            'GETHAN':     Operator('>=',     infix=(5, True)),
+            'LETHAN':     Operator('<=',     infix=(5, True)),
+            'GREATERTHAN':Operator('>',      infix=(5, True)),
+            'LESSTHAN':   Operator('<',      infix=(5, True)),
             'NOT':        Operator('not',                             prefix=4),
             'NAND':       Operator('nand',   infix=(3, True)),
             'AND':        Operator('and',    infix=(3, True)),
