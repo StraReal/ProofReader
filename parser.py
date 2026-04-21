@@ -2,13 +2,20 @@ from common_classes import *
 from itertools import combinations
 
 attributes = {}
-op_map = {
-            'PLUS': ('+', 2),
-            'MINUS': ('-', 2),
-            'ASSIGN': ('=', 0),
-            'MULTIPLY': ('*', 3),
-            'DIVIDE': ('/', 3),
-            'EQUALS': ('equals', 1)
+OP_MAP = {  # Use https://docs.python.org/3/reference/expressions.html#operator-precedence for reference
+            # TOKEN TYPE |      SYMBOL     | INFIX PREC,LEFT-ASS |  PREFIX PREC   | POSTFIX PREC
+            'MULTIPLY':   Operator('*',      infix=(7, True)),
+            'DIVIDE':     Operator('/',      infix=(7, True)),
+            'PLUS':       Operator('+',      infix=(6, True)),
+            'MINUS':      Operator('-',      infix=(6, True) ,        prefix=8),
+            'EQUALS':     Operator('equals', infix=(5, True)),
+            'NOT':        Operator('not',                             prefix=4),
+            'NAND':       Operator('nand',   infix=(3, True)),
+            'AND':        Operator('and',    infix=(3, True)),
+            'XOR':        Operator('xor',    infix=(2, True)),
+            'NOR':        Operator('nor',    infix=(1, True)),
+            'OR':         Operator('or',     infix=(1, True)),
+            'ASSIGN':     Operator('=',      infix=(0, True)),
         }
 
 class Parser:
@@ -25,6 +32,9 @@ class Parser:
 
     def current(self) -> Token:
         return self.tokens[self.pos] if self.pos < len(self.tokens) else self.tokens[-1]
+
+    def next(self) -> Token:
+        return self.tokens[self.pos+1] if self.pos+1 < len(self.tokens) else self.tokens[-1]
 
     def advance(self):
         self.pos += 1
@@ -59,15 +69,20 @@ class Parser:
                 self.advance()  # ]
                 self.pending_attributes[attr_name] = attr_args
 
+
             elif self.current().type == 'OPERATION':
                 op = self.parse_operation_definition()
-                self.operations[(op.left_type, op.operator, op.right_type)] = (op.return_type, op.cases, op.attributes)
+                if op.left_type is None:
+                    self.operations[(op.operator, op.right_type)] = (op.return_type, op.cases, op.attributes)
+                else:
+                    self.operations[(op.left_type, op.operator, op.right_type)] = (op.return_type, op.cases,
+                                                                                   op.attributes)
                 ordered.append(('operation', op))
 
             elif self.current().type == 'TYPE':
                 td = self.parse_type()
-                self.types[td] = td
-                ordered.append(('type', td))
+                self.types[td[0]] = td[0]
+                ordered.append(('type', td)) # name, aliases, accepts, matches
             elif self.current().type == 'IMPORT':
                 self.advance()
                 if self.current().type == 'VARIABLE':
@@ -83,7 +98,7 @@ class Parser:
                     proofs.extend(stmt)
         return self.axioms, self.theorems, hypothesis, proofs, [], ordered
 
-    def parse_hypothesis_block(self, stop_tokens: List[str] = None) -> HypothesisBlock:
+    def parse_hypothesis_block(self) -> HypothesisBlock:
 
         statements = []
         while self.current().type != 'DEDENT':
@@ -130,7 +145,7 @@ class Parser:
             sys.exit(1)
         self.advance()
 
-        given = self.parse_hypothesis_block(stop_tokens=['DEDENT'])
+        given = self.parse_hypothesis_block()
         self.advance()
 
         if self.current().type != 'THEN':
@@ -202,7 +217,7 @@ class Parser:
             sys.exit(1)
         self.advance()
 
-        given = self.parse_hypothesis_block(stop_tokens=['DEDENT'])
+        given = self.parse_hypothesis_block()
         self.advance()
         if self.current().type != 'THEN':
             print_error(line, "Syntax Error: Expected 'Then' in theorem", self.import_map)
@@ -224,20 +239,21 @@ class Parser:
             stmts = self.parse_statement()
             if stmts:
                 then_statements.extend(stmts)
+        self.advance()
 
         if self.current().type != 'PROOF':
-            print_error(line, "Syntax Error: Expected 'Proof' block in theorem '{name}'", self.import_map)
+            print_error(line, f"Syntax Error: Expected 'Proof' block in theorem '{name}'", self.import_map)
             sys.exit(1)
         self.advance()
         if self.current().type == 'COLON':
             self.advance()
 
         proof_statements = []
-        while self.current().type not in ('PROOF', 'AXIOM', 'THEOREM', 'TYPE','OPERATION','HYPOTHESIS', 'EOF', 'AT'):
+        while self.current().type != 'DEDENT':
             stmts = self.parse_statement()
             if stmts:
                 proof_statements.extend(stmts)
-
+        self.advance()
         let_objects = []
         let_numvars = []
         for stmt in given.statements:
@@ -265,50 +281,51 @@ class Parser:
     def parse_operation_definition(self):
         self.advance()  # skip 'operation'
 
-        left_type = self.current().value
+        first = self.current()
         self.advance()
 
-        line = self.current().line_num
-        if self.types.get(left_type) is None:
-            print_error(line, f"Syntax Error: Undefined type '{left_type}'",
-                        self.import_map)
-            sys.exit(1)
+        second = self.current()
 
-        operator = self.current().type  # PLUS, MINUS, MULTIPLY
-        self.advance()
+        if second.type in OP_MAP:
+            left_type = first.value
+            operator = second.type
+            self.advance()
+            right_type = self.current().value
+            self.advance()
 
-        right_type = self.current().value
-        self.advance()
-
-        line = self.current().line_num
-        if self.types.get(left_type) is None:
-            print_error(line, f"Syntax Error: Undefined type '{right_type}'",
-                        self.import_map)
-            sys.exit(1)
-
-        return_type = None
-        if self.current().type == 'ARROW_TYPE':
+            return_type = None
+            if self.current().type == 'ARROW_TYPE':
+                self.advance()
+                return_type = self.current().value
+                self.advance()
+        else:
+            operator = first.type
+            right_type = second.value
+            left_type = None
+            self.advance()
             self.advance()
             return_type = self.current().value
             self.advance()
 
         cases = []
-        if self.current().type == 'COLON':
+        self.advance()
+        if self.current().type == 'INDENT':
             self.advance()
-            while self.current().type not in ('EOF', 'OPERATION', 'TYPE', 'THEOREM', 'AXIOM'):
+            while self.current().type != 'DEDENT':
                 case = self.parse_statement()
-                if case:
-                    cases.extend(case)
+                cases.extend(case)
+            self.advance()  # skip DEDENT
 
         attributes = self.pending_attributes
         self.pending_attributes = {}
+
         return OperationDefinition(
             left_type=left_type,
             operator=operator,
             right_type=right_type,
             return_type=return_type,
             cases=cases,
-            attributes=attributes,  # from @[...] if any
+            attributes=attributes,
         )
 
     def parse_type(self):
@@ -317,27 +334,37 @@ class Parser:
         name = self.current().value
         self.advance()
 
-        constructors = []
-        if self.current().type == 'COLON':
+        aliases = []
+
+        # Optional single alias on the same line
+        if self.current().value == 'alias':
+            self.advance()
+            aliases.append(self.current().value)
+            self.advance()
+
+        accepts = []
+        matches = []
+
+        if self.current().type == 'INDENT':
             self.advance()
             while self.current().type != 'DEDENT':
-                if self.current().type == 'VARIABLE':
-                    constructor_name = self.current().value
+                if self.current().type == 'ALIAS':
                     self.advance()
-                    args = []
-                    if self.current().type == 'LPAR':
-                        self.advance()
-                        while self.current().type != 'RPAR':
-                            args.append(self.current().value)
-                            self.advance()
-                            if self.current().type == 'COMMA':
-                                self.advance()
-                        self.advance()  # skip )
-                    constructors.append((constructor_name, args))
+                    aliases.append(self.current().value)
+                    self.advance()
+                elif self.current().type == 'ACCEPTS':
+                    self.advance()
+                    accepts.append(self.current().value)
+                    self.advance()
+                elif self.current().type == 'MATCHES':
+                    self.advance()
+                    matches.append(self.current().value)
+                    self.advance()
                 else:
                     self.advance()
+            self.advance()  # skip DEDENT
 
-        return name
+        return name, aliases, accepts, matches
 
     def parse_axiom_bindings(self) -> list:
         raw_args = []
@@ -365,56 +392,46 @@ class Parser:
                 sides.append(right_operands)
         return sides
 
-    def parse_expression(self, left):
-
-        max_prec = 0
-        operators = []
-        operands = [left]
-
-        while self.current().type in op_map:
-            operators.append((self.current().type, op_map[self.current().type][1]))
-            max_prec = max(max_prec, op_map[self.current().type][1])
+    def expr(self, prev_prec=-1):
+        left = self.atom()
+        while self.current().type in OP_MAP:
+            op = self.current().type
+            op_info = OP_MAP[op]
+            if op_info.infix is None or op_info.infix[0] <= prev_prec:
+                break
+            prec, left_assoc = op_info.infix
             self.advance()
-            if self.current().type == 'VARIABLE' or self.current().type.startswith('LIT'):
-                operands.append((self.current().type, self.current().value))
-            else:
-                print_error(self.current().line_num, f"Unexpected value in expression: {self.current().value}", self.import_map)
+            left = Expression(op, left, self.expr(prec if left_assoc else prec - 1))
+        return left
+
+    def atom(self):
+        tok = self.current()
+        val_type = tok.type
+        value = tok.value
+
+        if val_type.startswith('LIT'):
             self.advance()
-
-        if len(operands) != len(operators) + 1:
-            print_error(self.current().line_num, f"Unexpected error",
-                        self.import_map)
-
-        if len(operators) == 0:
-            return Expression(operator='pass', left=left, right=left, line=self.current().line_num)
-        expr = None
-
-        for i in range(max_prec, -1, -1):
-            j = 0
-            while j < len(operators):
-                if operators[j][1] == i:
-                    l = operands[j]
-                    r = operands[j + 1]
-                    expr = Expression(operator=operators[j][0], left=l, right=r, line=self.current().line_num)
-                    operands[j] = expr
-                    operands.pop(j + 1)
-                    operators.pop(j)
-                else:
-                    j += 1
-        return expr
-
-    def parse_primary(self, val_type, value):
-        """Parse a single operand (valued or variable)"""
-        if val_type in ('INT', 'NAT','FLOAT','BOOL'):
-            if value == 'true':
-                value = True
-            if value == 'false':
-                value = False
             return val_type, value
+
         elif val_type == 'VARIABLE':
+            self.advance()
             return 'VARIABLE', value
+
+        elif val_type in OP_MAP and OP_MAP[val_type].prefix is not None:
+            self.advance()
+            return Expression(val_type, self.expr(OP_MAP[val_type].prefix), None, line=self.current().line_num)
+
+        elif val_type == 'LPAR':
+            self.advance()
+            node = self.expr(0)
+            if self.current().type != 'RPAR':
+                print_error(tok.line_num, "Expected closing ')'", self.import_map)
+                sys.exit(1)
+            self.advance()
+            return node
+
         else:
-            print_error(self.current().line, f"Expected operand, got {val_type}", self.import_map)
+            print_error(tok.line_num, f"Expected operand, got {val_type}", self.import_map)
             sys.exit(1)
 
     def parse_statement(self) -> List[Statement]:
@@ -422,7 +439,7 @@ class Parser:
         line = self.current().line_num
         line_val = self.current().line
 
-        if self.current().type == 'IDENT' and self.pos + 1 < len(self.tokens) and self.tokens[
+        if self.current().type == 'VARIABLE' and self.pos + 1 < len(self.tokens) and self.tokens[
             self.pos + 1].type == 'LBRACE':
             axiom_name = self.current().value
             self.advance()
@@ -434,27 +451,33 @@ class Parser:
                 print(f"Syntax Error: Expected '}}' after axiom bindings")
                 sys.exit(1)
             self.advance()
-
-            if self.current().type == 'ARROW':
+            if self.current().type == 'CONCL_ARROW':
                 self.advance()
                 conclusion = self.parse_statement()
                 statements.append(Statement('axiom_application', [axiom_name], value=str(raw_args), line=line))
                 statements.extend(conclusion)
             return statements
 
+
+
         elif self.current().type == 'LET':
             self.advance()
-
-            obj_type = self.current().type
-            obj = self.current().value if obj_type in ('IDENT', 'ANGLE', 'NUMVAR', 'VARIABLE') else None
-
-            statements.append(Statement('let', [obj], line=line))
-
-            following = self.parse_statement()
-            for s in following:
-                if s.line == line:
-                    s.in_let = True
-            statements.extend(following)
+            name_type = self.current().type
+            name = self.current().value
+            self.advance()
+            type_annotation = None
+            value = None
+            if name_type == 'VARIABLE':
+                if self.current().type in ('COLON', 'BE'):
+                    self.advance()
+                    type_annotation = self.current().value
+                    self.advance()
+                if self.current().type == 'ASSIGN':
+                    self.advance()
+                    value = self.expr()
+            statements.append(Statement('let', [(name_type, name)], value=value, line=line))
+            if type_annotation is not None:
+                statements.append(Statement('typehint', [name, type_annotation], line=line))
 
         elif self.current().type == 'NUMVAR':
             left = self.current().value
@@ -497,42 +520,29 @@ class Parser:
 
         elif self.current().type == 'VARIABLE':
             left_obj = self.current().value
-            left_type = self.current().type
             self.regress()
-            if self.current().type == 'LET':
-                self.advance()
-                self.advance()
-                if self.current().type not in ('COLON','BE'):
-                    print_error(line, f"Syntax Error: must define variable type: {left_obj}",
-                                self.import_map)
-                    sys.exit(1)
-                self.advance()
-                if self.current().type != 'VARIABLE':
-                    print_error(line, f"Syntax Error: must define variable type: {left_obj}",
-                                self.import_map)
-                    sys.exit(1)
-                var_type = self.current().value
-                if self.types.get(var_type) is None:
-                    print_error(line, f"Syntax Error: Undefined type '{var_type}'",
-                                self.import_map)
-                    sys.exit(1)
-                statements.append(Statement('typehint', [left_obj, var_type], line=line))
-                make_operation = True
-            elif self.current().type == 'COLON': #this is a type
+            if self.current().type in ('COLON','BE'): #this is a type
                 self.advance() # var (self)
                 make_operation = False
             else:
-                self.advance() # var (self)
+                self.advance()
                 make_operation = True
 
-            self.advance()  # next token
             if make_operation:
-                expr = self.parse_expression((left_type, left_obj))
+                expr = self.expr()
                 self.regress()
                 l = self.current().line
                 self.advance()
                 s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
                 statements.append(s)
+
+        elif self.current().type in OP_MAP:
+            expr = self.expr()
+            self.regress()
+            l = self.current().line
+            self.advance()
+            s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
+            statements.append(s)
 
         elif self.current().type == 'IDENT':
             left = self.current().value
@@ -555,7 +565,7 @@ class Parser:
                     right_ops = sides[i + 1][0]
                     right_type = sides[i + 1][1]
                     right_val = sides[i + 1][2]
-                    if right_val is not None and right_type in ('NUMBER', 'NUMVAR'):
+                    if right_val is not None and right_type in ('LITINT', 'NUMVAR', 'LITNAT', 'LITFLOAT'):
                         if len(left_ops) == 1:
                             statements.append(Statement('assignment', [left_ops[0][1], right_val], line=line))
                         else:
@@ -626,7 +636,7 @@ class Parser:
                     right_ops = sides[i + 1][0]
                     right_type = sides[i + 1][1]
                     right_val = sides[i + 1][2]
-                    if right_val is not None and right_type in ('NUMBER', 'NUMVAR'):
+                    if right_val is not None and right_type in  ('LITINT', 'NUMVAR', 'LITNAT', 'LITFLOAT'):
                         if len(left_ops) == 1:
                             statements.append(Statement('assignment', [left_ops[0][1], right_val], line=line))
                         else:
@@ -696,11 +706,8 @@ class Parser:
                         statements.append(Statement('sum_equality', [left_ops, right_ops], line=line))
 
         elif self.current().type.startswith('LIT'):
-            left_type = self.current().type
-            left_obj = self.current().value
             l = self.current().line
-            self.advance()
-            expr = self.parse_expression((left_type, left_obj))
+            expr = self.expr()
             s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
             statements.append(s)
             self.advance()
@@ -709,6 +716,16 @@ class Parser:
             self.advance()
             statements.append(Statement('print', [self.current().value], line=line))
             self.advance()
+
+        elif self.current().type == 'GIVES':
+            self.advance()
+            l = self.current().line
+            expr = self.expr()
+            self.regress()
+            self.advance()
+            s = Statement('gives', [expr, l.strip()], line=line)
+            statements.append(s)
+
         else:
             self.advance()
         while self.current().type == 'EQUALS':
@@ -719,10 +736,14 @@ class Parser:
                 for s in statements:
                     if not goal:
                         s.goal = not s.goal
+
+        if self.current().type == 'NEWLINE':
+            self.advance()
+
         return statements
 
     def parse_rhs(self, allowed_types: Sequence[str], line: int) -> tuple:
-        if self.current().type not in ('NUMBER', 'NUMVAR') and self.current().type not in allowed_types:
+        if self.current().type not in  ('LITINT', 'NUMVAR', 'LITNAT', 'LITFLOAT') and self.current().type not in allowed_types:
             print_error(line, f"Syntax Error: Unexpected token '{self.current().value}' after '='",
                         self.import_map)
             sys.exit(1)

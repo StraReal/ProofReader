@@ -45,3 +45,20 @@ operation Int - Int -> Int
 @[extern eq_comp]
 operation Int equals Nat -> Bool
 
+@[extern and]
+operation Bool and Bool -> Bool
+
+@[extern or]
+operation Bool or Bool -> Bool
+
+operation not Bool -> Bool
+    gives first equals false
+
+operation Bool nand Bool -> Bool
+    gives not (first and second)
+
+operation Bool nor Bool -> Bool
+    gives not (first or second)
+
+operation Bool xor Bool -> Bool
+    gives (first or second) and not (first and second)

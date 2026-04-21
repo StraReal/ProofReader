@@ -103,7 +103,7 @@ theorem AnSiAn:
 
         angGBC = angABC = angDEF
 
-        SAS{GBC DEF} => GBC = DEF
+        SiAnSi{GBC DEF} => GBC = DEF
         CorrespondingPartsCongruent{GBC DEF} => GC = DF
         CorrespondingPartsCongruent{GBC DEF} => angBCG = angEFD
         CorrespondingPartsCongruent{GBC DEF} => angBGC = angEDF
@@ -118,4 +118,4 @@ theorem AnSiAn:
 
         # Now we have AB = DE, BC = EF, angABC = angDEF
         # Apply SAS to get full congruence
-        SAS{ABC DEF} => ABC = DEF
+        SiAnSi{ABC DEF} => ABC = DEF

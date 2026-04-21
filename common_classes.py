@@ -12,6 +12,14 @@ class OperationDefinition:
     cases: list  # pattern matching cases
     attributes: dict
 
+@dataclass(slots=True, frozen=True)
+class Operator:
+    symbol: str
+    prefix: int | None = None
+    postfix: int | None = None
+    infix: tuple[int, bool] | None = None
+    distfix: tuple[str, int, bool] | None = None
+
 @dataclass
 class Statement:
     type: str  # 'let', 'equality', 'angle_claim'

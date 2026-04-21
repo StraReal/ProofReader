@@ -39,7 +39,10 @@ class Validator:
 
         for kind, item in ordered:
             if kind == 'operation':
-                t = self.normalize_comparison(item.left_type, item.operator, item.right_type)
+                if item.left_type is None:
+                    t = (item.operator, item.right_type)
+                else:
+                    t = self.normalize_comparison(item.left_type, item.operator, item.right_type)
                 self.operations[t] = (item.return_type, item.cases, item.attributes)
 
         if hypothesis:
@@ -56,11 +59,13 @@ class Validator:
                 self.process_statement(item, is_hypothesis=False)
                 self.propagate_transitivity()
             elif kind == 'operation':
-                #print(item)
-                t = self.normalize_comparison(item.left_type, item.operator, item.right_type)
+                if item.left_type is None:
+                    t = (item.operator, item.right_type)
+                else:
+                    t = self.normalize_comparison(item.left_type, item.operator, item.right_type)
                 self.operations[t] = (item.return_type, item.cases, item.attributes)
             elif kind == 'type':
-                self.types[item] = item
+                self.types[item[0]] = item
 
         for stmt in proofs:
             self.process_statement(stmt, is_hypothesis=False)
@@ -727,21 +732,81 @@ class Validator:
                 self._err(line, f"Unknown external function '{extern_name}'"))
             return None
 
-    def solve_expression(self, expression, make_true:bool=False) -> Expression| Tuple[str, any]| None:
+    def solve_expression(self, expression, make_true: bool = False) -> Expression | Tuple[str, any] | None:
+        if isinstance(expression, tuple):
+            val = expression[1]
+            ex_type = expression[0]
+            if ex_type.upper().startswith('LIT'):
+                ex_type = ex_type[3:].capitalize()
+            return (ex_type, val)
+        if isinstance(expression, Statement):
+            if expression.type == 'gives':
+                expr_to_evaluate = expression.objects[0]
+                return self.solve_expression(expr_to_evaluate, make_true)
+            else:
+                self.solve_expression(expression, make_true=True)
+                return None
+
         if expression.operator == 'pass':
             return 'Bool', 'true'
-        if type(expression.left) == Expression:
-            expression.left = self.solve_expression(expression.left, make_true)
-        if type(expression.right) == Expression:
-            expression.right = self.solve_expression(expression.right, make_true)
 
-        left = expression.left
-        right = expression.right
+        left = getattr(expression, 'left', None)
+        right = getattr(expression, 'right', None)
+
+        if type(left) == Expression:
+            left = self.solve_expression(expression.left, make_true)
+            expression.left = left
+        if type(right) == Expression:
+            right = self.solve_expression(expression.right, make_true)
+            expression.right = right
+
         operator = expression.operator
         expr = expression
 
-        if left is None or right is None:
-            return None
+        if right is None:
+            if left[0] == 'VARIABLE':
+                x_var = self.variables.get(left[1])
+                if x_var is None:
+                    self.errors.append(self._err(expr.line, f"Undefined variable '{left[1]}'."))
+                    return None
+                x_type = x_var[0]
+                x_value = x_var[1]
+            else:
+                x_type = left[0].capitalize()
+                if left[0].upper().startswith('LIT'):
+                    x_type = x_type[3:].capitalize()
+                x_value = left[1]
+
+            if x_value is None:
+                self.errors.append(self._err(expr.line, f"Cannot calculate expression with unknown (given: {left[1]})"))
+                return None
+
+            t = (operator, x_type)
+            op_def = self.operations.get(t)
+            if op_def is None:
+                self.errors.append(self._err(expr.line, f"Operator {operator} is not defined for {x_type}"))
+                return None
+
+            if op_def[2]:
+                extern_name = op_def[2]['extern'][0]
+                return self.call_extern(extern_name, None, x_value, expr.line, op_def[0])
+            else:
+                self.variables['first'] = [x_type, x_value]
+                result = None
+                try:
+                    for statement in op_def[1]:
+                        if isinstance(statement, Statement) and statement.type == 'gives':
+                            result = self.solve_expression(statement)
+                            break
+                        else:
+                            self.solve_expression(statement, make_true=True)
+                finally:
+                    self.variables.pop('first', None)
+
+                if result is None:
+                    self.errors.append(self._err(expr.line, f"Operation {operator} produced no result"))
+                    return None
+                return result
 
         if left[0] == 'VARIABLE':
             l_var = self.variables.get(left[1])
@@ -759,7 +824,6 @@ class Validator:
                 l_type = l_type[3:].capitalize()
             left_value = left[1]
 
-
         if right[0] == 'VARIABLE':
             r_var = self.variables.get(right[1])
             if r_var is None:
@@ -776,26 +840,26 @@ class Validator:
         if left_value is None or right_value is None:
             if operator != 'ASSIGN':
                 both_unkn = left_value is None and right_value is None
-                given_str = (left[1] if left_value is None else '')+(', 'if both_unkn else '')+(right[1] if right_value is None else '')
+                given_str = (left[1] if left_value is None else '') + (', ' if both_unkn else '') + (
+                    right[1] if right_value is None else '')
                 self.errors.append(
-                        self._err(expr.line, f"Cannot calculate expressions with unknowns (given: {given_str})"))
+                    self._err(expr.line, f"Cannot calculate expressions with unknowns (given: {given_str})"))
                 return None
 
         if operator == 'ASSIGN':
-            if self.operations.get((l_type, operator, r_type)) is None and l_type!=r_type:
-                self.errors.append(
-                    self._err(expr.line, f"Cannot assign {r_type} to {l_type}"))
+            if self.operations.get((l_type, operator, r_type)) is None and l_type != r_type:
+                self.errors.append(self._err(expr.line, f"Cannot assign {r_type} to {l_type}"))
                 return None
             if make_true:
                 self.variables[left[1]][1] = right_value
             return 'Bool', 'true'
+
         elif operator == 'EQUALS':
             t = self.normalize_comparison(l_type, operator, r_type)
             op_def = self.operations.get(t)
             if op_def is None:
-                if l_type==r_type:
-                    extern_name = 'eq_comp'
-                    result = self.call_extern(extern_name, left_value, right_value, expr.line, 'Bool')
+                if l_type == r_type:
+                    return self.call_extern('eq_comp', left_value, right_value, expr.line, 'Bool')
                 else:
                     self.errors.append(
                         self._err(expr.line, f"Operator {operator} is not defined for {l_type} and {r_type}"))
@@ -803,21 +867,29 @@ class Validator:
             else:
                 if op_def[2]:
                     extern_name = op_def[2]['extern'][0]
-                    result = self.call_extern(extern_name, left_value, right_value, expr.line, op_def[0])
+                    return self.call_extern(extern_name, left_value, right_value, expr.line, op_def[0])
                 else:
-                    self.errors.append(
-                        self._err(expr.line, f"Temporary error"))
-                    return None
+                    self.variables['first'] = [l_type, left_value]
+                    self.variables['second'] = [r_type, right_value]
+                    result = None
+                    try:
+                        for statement in op_def[1]:
+                            if isinstance(statement, Statement) and statement.type == 'gives':
+                                result = self.solve_expression(statement)
+                                break
+                            else:
+                                self.solve_expression(statement, make_true=True)
+                    finally:
+                        self.variables.pop('first', None)
+                        self.variables.pop('second', None)
 
-                if not result:
-                    self.errors.append(
-                        self._err(expr.line, f"{left} does not equal {right}"))
-                    return None
-
+                    if result is None:
+                        self.errors.append(self._err(expr.line, f"Operation {operator} produced no result"))
+                        return None
+                    return result
         else:
             t = self.normalize_comparison(l_type, operator, r_type)
             op_def = self.operations.get(t)
-
             if op_def is None:
                 self.errors.append(
                     self._err(expr.line, f"Operator {operator} is not defined for {l_type} and {r_type}"))
@@ -825,17 +897,26 @@ class Validator:
             else:
                 if op_def[2]:
                     extern_name = op_def[2]['extern'][0]
-                    result = self.call_extern(extern_name, left_value, right_value, expr.line, op_def[0])
+                    return self.call_extern(extern_name, left_value, right_value, expr.line, op_def[0])
                 else:
-                    self.errors.append(
-                        self._err(expr.line, f"Temporary error"))
-                    return None
+                    self.variables['first'] = [l_type, left_value]
+                    self.variables['second'] = [r_type, right_value]
+                    result = None
+                    try:
+                        for statement in op_def[1]:
+                            if isinstance(statement, Statement) and statement.type == 'gives':
+                                result = self.solve_expression(statement)
+                                break
+                            else:
+                                self.solve_expression(statement, make_true=True)
+                    finally:
+                        self.variables.pop('first', None)
+                        self.variables.pop('second', None)
 
-                if not result:
-                    self.errors.append(
-                        self._err(expr.line, f"{left} does not equal {right}"))
-                    return None
-        return result
+                    if result is None:
+                        self.errors.append(self._err(expr.line, f"Operation {operator} produced no result"))
+                        return None
+                    return result
 
     def process_statement(self, stmt: Statement, is_hypothesis: bool):
         make_true = is_hypothesis or (stmt.in_let and not self.last_let_failed)
@@ -847,25 +928,42 @@ class Validator:
 
         if stmt.type == 'let':
             self.last_let_failed = False
-            points = list(stmt.objects[0])
-            all_defined = all(p in self.defined_objects for p in points)
-            none_in_proof = not any(p in self.proof_defined_objects for p in points)
-            if not is_hypothesis and all_defined and none_in_proof:
-                self.errors.append(
-                    self._err(stmt.line, f"'{stmt.objects[0]}' is already fully defined in the hypothesis"))
-                self.last_let_failed = True
+            stmt_object = stmt.objects[0]
+            value = stmt.value
+
+            if stmt_object[0] == 'VARIABLE':
+                if value is not None:
+                    if type(value) is tuple:
+                        if value[0].startswith('LIT'):
+                            value = value[1]
+                        else:
+                            value = self.variables[value[1]][1]
+                    else:
+                        value = self.solve_expression(value, make_true)
+                self.variables[stmt_object[1]] = [None, value]
+            else:
+                points = list(stmt_object)
+                all_defined = all(p in self.defined_objects for p in points)
+                none_in_proof = not any(p in self.proof_defined_objects for p in points)
+                if not is_hypothesis and all_defined and none_in_proof:
+                    self.errors.append(
+                        self._err(stmt.line, f"'{stmt.objects[0]}' is already fully defined in the hypothesis"))
+                    self.last_let_failed = True
+                    return
+                for p in points:
+                    self.defined_objects.add(p)
+                    if not is_hypothesis:
+                        self.proof_defined_objects.add(p)
                 return
-            for p in points:
-                self.defined_objects.add(p)
-                if not is_hypothesis:
-                    self.proof_defined_objects.add(p)
-            return
 
         if stmt.type == 'typehint':
             variable = stmt.objects[0]
             o_type = stmt.objects[1]
 
-            self.variables[variable] = [o_type, None]
+            var = self.variables.get(variable)
+            if var is None:
+                var = None, None
+            self.variables[variable] = [o_type, var[1]]
 
         if stmt.type == 'chain_conclusion':
             left_ops, right_ops, right_type, right_val = stmt.objects
@@ -904,6 +1002,7 @@ class Validator:
             expected_str = "true" if stmt.goal else "false"
 
             if result == 11:
+                self.errors.append(self._err(stmt.line, self.defined_objects))
                 self.errors.append(self._err(stmt.line, f"Object '{left}' not defined"))
                 return
             if result == 12:
@@ -975,7 +1074,6 @@ class Validator:
         for combo in product(*perm_lists):
             bindings = self._try_build_bindings(axiom, list(combo), num_args)
             if bindings is not None and self._check_bindings(axiom, bindings):
-                print(f"DEBUG _build_bindings: found binding {bindings} for combo {combo} ({axiom.name})")
                 return bindings
 
         return None

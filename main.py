@@ -24,8 +24,12 @@ simple_keywords = { #require space or end
     'axiom': 'AXIOM',
     'theorem': 'THEOREM',
     'operation': 'OPERATION',
-    '->': 'ARROW_TYPE',
     'type': 'TYPE',
+    'tuple': 'TUPLE',
+    'alias': 'ALIAS',
+    'matches': 'MATCHES',
+    'accepts': 'ACCEPTS',
+    'gives': 'GIVES',
     'is congruent to': 'EQUALS',
     'be': 'BE'
     #'validate_assignment': 'VALIDATE_ASSIGNMENT',
@@ -50,6 +54,7 @@ nonwhitespace_keywords = {
     ',': 'COMMA',
     ':': 'COLON',
     '=>': 'CONCL_ARROW',
+    '->': 'ARROW_TYPE',
     '@': 'AT',
 }
 
@@ -64,11 +69,17 @@ operators = {
     '!=': 'INEQUALS',
     'equals': 'EQUALS',
     'is': 'EQUALS',
+    'and': 'AND',
+    'or': 'OR',
+    'not': 'NOT',
+    'nor': 'NOR',
+    'xor': 'XOR',
+    'nand': 'NAND',
 }
 
 literals = {
-    'true': ('LITBOOL', bool),
-    'false': ('LITBOOL', bool)
+    'true': ('LITBOOL', 'true', False),
+    'false': ('LITBOOL', 'false', False)
 }
 
 def check_balanced(code: str, import_map: dict):
@@ -136,6 +147,9 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
     lines = code.split('\n')
 
     for line_num, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
 
         current_indent = calculate_indentation(line, tab_width)
         if current_indent > indent_stack[-1]:
@@ -167,13 +181,19 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
                 if line[pos:].startswith(keyword):
                     end_pos = pos + len(keyword)
                     if end_pos >= len(line):
-                        tokens.append(Token(token_type[0], token_type[1](keyword), line_num, line))
+                        if token_type[2]:
+                            tokens.append(Token(token_type[0], token_type[1](keyword), line_num, line))
+                        else:
+                            tokens.append(Token(token_type[0], token_type[1], line_num, line))
                         pos += len(keyword)
                         matched = True
                         break
                     if not line[end_pos].isspace():
                         continue
-                    tokens.append(Token(token_type[0], token_type[1](keyword), line_num, line))
+                    if token_type[2]:
+                        tokens.append(Token(token_type[0], token_type[1](keyword), line_num, line))
+                    else:
+                        tokens.append(Token(token_type[0], token_type[1], line_num, line))
                     pos += len(keyword)
                     matched = True
                     break
@@ -231,7 +251,7 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
                 continue
 
             for op in sorted(nonwhitespace_keywords, key=len, reverse=True):
-                if line[pos].startswith(op):
+                if line[pos:].startswith(op):
                     tokens.append(Token(nonwhitespace_keywords[op], op, line_num, line))
                     pos+=len(op)
                     op_matched = True
@@ -323,7 +343,7 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
             else:
                 print_error(line_num, f"Syntax Error: Invalid character '{line[pos]}'", import_map)
                 sys.exit(1)
-
+        tokens.append(Token('NEWLINE', '\n', line_num, line))
     while len(indent_stack) > 1:
         indent_stack.pop()
         tokens.append(Token('DEDENT', '', len(lines), ''))
@@ -349,7 +369,6 @@ while True:
     import_map = {i + 1: file_tracker[i] for i in range(len(file_tracker))}
     check_balanced(code, import_map)
     tokens = tokenize(code, import_map)
-    print(tokens)
     parser = Parser(tokens, import_map)
     axioms, theorems, hypothesis, proofs, to_import, ordered = parser.parse()
 
