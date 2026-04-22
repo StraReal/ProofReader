@@ -1,11 +1,11 @@
-axiom SideSwitching:
-    Given:
-        let AB
-        let CD
-        let EF
-        AB + CD equals EF
-    Then:
-        AB equals EF - CD
+#axiom SideSwitching:
+#    Given:
+#        let AB
+#        let CD
+#        let EF
+#        AB + CD equals EF
+#    Then:
+#        AB equals EF - CD
 
 type Nat
 type Bool
@@ -34,13 +34,13 @@ operation Int * Int -> Int
 
 
 @[extern exp]
-operation Nat ** Nat -> Nat
+operation Nat ^ Nat -> Nat
 
 @[extern exp]
-operation Int ** Nat -> Int
+operation Int ^ Nat -> Int
 
 @[extern exp]
-operation Int ** Int -> Int
+operation Int ^ Int -> Int
 
 
 @[extern gt]
@@ -105,4 +105,4 @@ operation Bool nor Bool -> Bool
     gives not (first or second)
 
 operation Bool xor Bool -> Bool
-    gives (first or second) and not (first and second)
+    gives not (first equals second)

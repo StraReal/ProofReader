@@ -2,12 +2,8 @@
 import MathAxioms
 
 Hypothesis:
-    let truevar : Bool = true
-    let b be Bool = truevar
-    let var : Bool = true
     let a be Nat = 3
     let b be Nat = 3
 
 Proof:
-    a < b or a equals b #TODO here
-    a <= b
+    true xor true

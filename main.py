@@ -64,7 +64,7 @@ operators = {
     '*': 'MULTIPLY',
     '/': 'DIVIDE',
     '=': 'ASSIGN',
-    '**': 'EXPONENT',
+    '^': 'EXPONENT',
     '>': 'GREATERTHAN',
     '<': 'LESSTHAN',
     '>=': 'GETHAN',
@@ -150,8 +150,18 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
     lines = code.split('\n')
 
     for line_num, line in enumerate(lines, 1):
+        in_string = False
+        for i, ch in enumerate(line):
+            if ch == '"':
+                in_string = not in_string
+            elif ch == '#' and not in_string:
+                line = line[:i]
+                break
+
+        lines[line_num - 1] = line
+
         stripped = line.strip()
-        if not stripped or stripped.startswith('#'):
+        if not stripped:
             continue
 
         current_indent = calculate_indentation(line, tab_width)
@@ -171,6 +181,7 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
         pos = 0
         while pos < len(line):
             if line[pos:].startswith('#'):
+                line = line[:pos]
                 break
 
             elif line[pos].isspace():

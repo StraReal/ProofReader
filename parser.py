@@ -4,7 +4,7 @@ from itertools import combinations
 attributes = {}
 OP_MAP = {  # Use https://docs.python.org/3/reference/expressions.html#operator-precedence for reference
             # TOKEN TYPE |      SYMBOL     | INFIX PREC,LEFT-ASS |  PREFIX PREC   | POSTFIX PREC
-            'EXPONENT':   Operator('**',     infix=(9, True)),
+            'EXPONENT':   Operator('^',     infix=(9, True)),
             'MULTIPLY':   Operator('*',      infix=(7, True)),
             'DIVIDE':     Operator('/',      infix=(7, True)),
             'PLUS':       Operator('+',      infix=(6, True)),
@@ -429,7 +429,7 @@ class Parser:
 
         elif val_type == 'LPAR':
             self.advance()
-            node = self.expr(0)
+            node = self.expr(-1)
             if self.current().type != 'RPAR':
                 print_error(tok.line_num, "Expected closing ')'", self.import_map)
                 sys.exit(1)
@@ -542,7 +542,7 @@ class Parser:
                 s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
                 statements.append(s)
 
-        elif self.current().type in OP_MAP:
+        elif self.current().type in OP_MAP or self.current().type == 'LPAR':
             expr = self.expr()
             self.regress()
             l = self.current().line

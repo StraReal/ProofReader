@@ -723,6 +723,11 @@ class Validator:
         """Call an external function by name"""
         if extern_name in externs:
             extern_func = externs[extern_name]
+            if left_value == 'true': left_value = True
+            elif left_value == 'false': left_value = False
+            if right_value == 'true': right_value = True
+            elif right_value == 'false': right_value = False
+
             res = extern_func(left_value, right_value)
             if res is True: res='true'
             if res is False: res='false'
@@ -731,6 +736,25 @@ class Validator:
             self.errors.append(
                 self._err(line, f"Unknown external function '{extern_name}'"))
             return None
+
+    def _call_op(self, op_def, bindings):
+        saved = {k: self.variables[k] for k in bindings if k in self.variables}
+        self.variables.update(bindings)
+        result = None
+        try:
+            for statement in op_def[1]:
+                if isinstance(statement, Statement) and statement.type == 'gives':
+                    result = self.solve_expression(statement)
+                    break
+                else:
+                    self.solve_expression(statement, make_true=True)
+        finally:
+            for k in bindings:
+                if k in saved:
+                    self.variables[k] = saved[k]
+                else:
+                    self.variables.pop(k, None)
+        return result
 
     def solve_expression(self, expression, make_true: bool = False) -> Expression | Tuple[str, any] | None:
         if isinstance(expression, tuple):
@@ -791,18 +815,7 @@ class Validator:
                 extern_name = op_def[2]['extern'][0]
                 return self.call_extern(extern_name, None, x_value, expr.line, op_def[0])
             else:
-                self.variables['first'] = [x_type, x_value]
-                result = None
-                try:
-                    for statement in op_def[1]:
-                        if isinstance(statement, Statement) and statement.type == 'gives':
-                            result = self.solve_expression(statement)
-                            break
-                        else:
-                            self.solve_expression(statement, make_true=True)
-                finally:
-                    self.variables.pop('first', None)
-
+                result = self._call_op(op_def, {'first': [x_type, x_value]})
                 if result is None:
                     self.errors.append(self._err(expr.line, f"Operation {operator} produced no result"))
                     return None
@@ -897,22 +910,11 @@ class Validator:
             else:
                 if op_def[2]:
                     extern_name = op_def[2]['extern'][0]
+                    print(expr)
+                    print(self.call_extern(extern_name, left_value, right_value, expr.line, op_def[0]))
                     return self.call_extern(extern_name, left_value, right_value, expr.line, op_def[0])
                 else:
-                    self.variables['first'] = [l_type, left_value]
-                    self.variables['second'] = [r_type, right_value]
-                    result = None
-                    try:
-                        for statement in op_def[1]:
-                            if isinstance(statement, Statement) and statement.type == 'gives':
-                                result = self.solve_expression(statement)
-                                break
-                            else:
-                                self.solve_expression(statement, make_true=True)
-                    finally:
-                        self.variables.pop('first', None)
-                        self.variables.pop('second', None)
-
+                    result = self._call_op(op_def, {'first': [l_type, left_value], 'second': [r_type, right_value]})
                     if result is None:
                         self.errors.append(self._err(expr.line, f"Operation {operator} produced no result"))
                         return None
