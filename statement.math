@@ -5,4 +5,4 @@ Hypothesis:
     let a be Nat = 3
 
 Proof:
-    (a != (4 - 129^0)) is false
+    a != 4 - 129^0 is false

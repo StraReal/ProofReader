@@ -496,7 +496,10 @@ class Parser:
                 if self.current().type == 'ASSIGN':
                     self.advance()
                     value = self.expr()
-            statements.append(Statement('let', [(name_type, name)], value=value, line=line))
+                statements.append(Statement('let', [(name_type, name)], value=value, line=line))
+            elif name_type == 'IDENT':
+                statements.append(Statement('let', [(name_type, name)], value=value, line=line))
+                statements.extend(self.parse_statement())
             if type_annotation is not None:
                 statements.append(Statement('typehint', [name, type_annotation], line=line))
 
@@ -698,33 +701,6 @@ class Parser:
                 right = self.current().value
                 self.advance()
                 statements.append(Statement('greater_than', [left_angle, right], line=line))
-
-        elif self.current().type == 'NUMBER':
-            left = self.current().value
-            self.advance()
-            left_operands = self.parse_sum_operands(left, ('NUMBER', 'ANGLE', 'IDENT'))
-            if self.current().type in ('ASSIGN', 'EQUALS'):
-                sides = [(left_operands, None, None)]
-                while self.current().type in ('ASSIGN', 'EQUALS'):
-                    self.advance()
-                    rhs = self.parse_rhs(('NUMBER', 'ANGLE', 'IDENT'), line)
-                    if rhs[0] == 'single':
-                        _, right, right_type = rhs
-                        sides.append(([('+', right)], right_type, right))
-                    else:
-                        _, right_operands = rhs
-                        sides.append((right_operands, None, None))
-                for i in range(len(sides) - 1):
-                    left_ops = sides[i][0]
-                    right_ops = sides[i + 1][0]
-                    right_type = sides[i + 1][1]
-                    right_val = sides[i + 1][2]
-                    if right_val is not None and right_type in ('NUMBER', 'NUMVAR'):
-                        statements.append(Statement('sum_assignment', [left_ops, right_val], line=line))
-                    elif right_val is not None:
-                        statements.append(Statement('sum_equality', [left_ops, right_ops], line=line))
-                    else:
-                        statements.append(Statement('sum_equality', [left_ops, right_ops], line=line))
 
         elif self.current().type.startswith('LIT'):
             l = self.current().line
