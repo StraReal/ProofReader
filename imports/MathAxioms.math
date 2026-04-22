@@ -11,6 +11,7 @@ type Nat
 type Bool
 type Int
 type String
+type Tuple
 
 # nat and int
 @[extern add]
@@ -55,6 +56,16 @@ operation Int <= Int -> Bool
 
 operation Int >= Int -> Bool
     gives first > second or first equals second
+
+
+operation Int != Int -> Bool
+    gives not (first equals second)
+
+operation Nat != Int -> Bool
+    gives not (first equals second)
+
+operation Nat != Nat -> Bool
+    gives not (first equals second)
 
 
 @[extern gt]

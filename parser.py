@@ -4,7 +4,8 @@ from itertools import combinations
 attributes = {}
 OP_MAP = {  # Use https://docs.python.org/3/reference/expressions.html#operator-precedence for reference
             # TOKEN TYPE |      SYMBOL     | INFIX PREC,LEFT-ASS |  PREFIX PREC   | POSTFIX PREC
-            'EXPONENT':   Operator('^',     infix=(9, True)),
+            'FIELDACCESS':Operator("'s ",    infix=(10, True)),
+            'EXPONENT':   Operator('^',      infix=(9, True)),
             'MULTIPLY':   Operator('*',      infix=(7, True)),
             'DIVIDE':     Operator('/',      infix=(7, True)),
             'PLUS':       Operator('+',      infix=(6, True)),
@@ -419,22 +420,36 @@ class Parser:
             self.advance()
             return val_type, value
 
+
+
         elif val_type == 'VARIABLE':
             self.advance()
             return 'VARIABLE', value
 
         elif val_type in OP_MAP and OP_MAP[val_type].prefix is not None:
             self.advance()
-            return Expression(val_type, self.expr(OP_MAP[val_type].prefix), None, line=self.current().line_num)
+            return Expression(val_type, self.expr(OP_MAP[val_type].prefix), 'none_for_unary', line=self.current().line_num)
+
 
         elif val_type == 'LPAR':
             self.advance()
-            node = self.expr(-1)
-            if self.current().type != 'RPAR':
-                print_error(tok.line_num, "Expected closing ')'", self.import_map)
-                sys.exit(1)
-            self.advance()
-            return node
+            first = self.expr(-1)
+            if self.current().type == 'COMMA':
+                elements = [first]
+                while self.current().type == 'COMMA':
+                    self.advance()  # consume ','
+                    elements.append(self.expr(-1))
+                if self.current().type != 'RPAR':
+                    print_error(tok.line_num, "Expected closing ')'", self.import_map)
+                    sys.exit(1)
+                self.advance()
+                return 'TUPLE', elements
+            else:
+                if self.current().type != 'RPAR':
+                    print_error(tok.line_num, "Expected closing ')'", self.import_map)
+                    sys.exit(1)
+                self.advance()
+                return first
 
         else:
             print_error(tok.line_num, f"Expected operand, got {val_type}", self.import_map)

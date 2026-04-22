@@ -3,7 +3,6 @@ import MathAxioms
 
 Hypothesis:
     let a be Nat = 3
-    let b be Nat = 3
 
 Proof:
-    true xor true
+    (a != (4 - 129^0)) is false

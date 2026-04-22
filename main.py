@@ -78,6 +78,7 @@ operators = {
     'nor': 'NOR',
     'xor': 'XOR',
     'nand': 'NAND',
+    "'s ": 'FIELDACCESS',
 }
 
 literals = {

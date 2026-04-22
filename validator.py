@@ -787,7 +787,11 @@ class Validator:
         operator = expression.operator
         expr = expression
 
+        if left is None:
+            return None
         if right is None:
+            return None
+        if right == 'none_for_unary':
             if left[0] == 'VARIABLE':
                 x_var = self.variables.get(left[1])
                 if x_var is None:
@@ -939,10 +943,20 @@ class Validator:
                         if value[0].startswith('LIT'):
                             value = value[1]
                         else:
-                            value = self.variables[value[1]][1]
+                            if value[0] == 'TUPLE':
+                                vals = []
+                                for item in value[1]:
+                                    if item[0] == 'VARIABLE':
+                                        vals.append(self.variables[item[1]][1])
+                                    else:
+                                        vals.append(item[1])
+                                value = tuple(vals)
+                            else:
+                                value = self.variables[value[1]][1]
                     else:
                         value = self.solve_expression(value, make_true)
                 self.variables[stmt_object[1]] = [None, value]
+
             else:
                 points = list(stmt_object)
                 all_defined = all(p in self.defined_objects for p in points)
@@ -1053,6 +1067,7 @@ class Validator:
             return
 
         if stmt.type == 'expression':
+            print(stmt.objects[0])
             res = self.solve_expression(stmt.objects[0], make_true)
             if res is not None:
                 if res[0] == 'Bool':
