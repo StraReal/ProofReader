@@ -5,10 +5,12 @@ Hypothesis:
     let a be Nat = 3
     let AB = 3
     let number = 4
-    let randomtuple : Namedtuple = (r = 4, g = 200, b = 250)
+    let randomtuple : Namedtuple = (r = 3, g = 200, b = 250)
+    randomtuple's r = 2
     let anontuple : Tuple = (120, 121, 330)
+    anontuple[0] = 20
 
 
 Proof:
-    randomtuple's r equals number
-    anontuple[0] equals 120
+    randomtuple's r equals 2
+    anontuple[0] equals 21

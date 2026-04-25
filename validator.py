@@ -759,6 +759,40 @@ class Validator:
 
         left = getattr(expression, 'left', None)
         right = getattr(expression, 'right', None)
+        expr = expression
+        operator = expression.operator
+
+        if operator == 'ASSIGN' and isinstance(left, Expression) and left.operator == 'FIELDACCESS':
+            tuple_name = left.left[1]
+            field_name = left.right[1]
+            t_var = self.variables.get(tuple_name)
+            if t_var is None or t_var[0] != 'Namedtuple':
+                self.errors.append(self._err(expr.line, f"'{tuple_name}' is not a namedtuple"))
+                return None
+            field = t_var[1].get(field_name)
+            if field is None:
+                self.errors.append(self._err(expr.line, f"No field '{field_name}' in '{tuple_name}'"))
+                return None
+            if make_true:
+                right_val = self.solve_expression(right, make_true)
+                field[0] = right_val[0]
+                field[1] = right_val[1]
+            return ('Bool', 'true')
+
+        if operator == 'ASSIGN' and isinstance(left, Expression) and left.operator == 'INDEXACCESS':
+            tuple_name = left.left[1]
+            index = left.right[1]
+            t_var = self.variables.get(tuple_name)
+            if t_var is None or t_var[0] != 'Tuple':
+                self.errors.append(self._err(expr.line, f"'{tuple_name}' is not a tuple"))
+                return None
+            if index < 0 or index >= len(t_var[1]):
+                self.errors.append(self._err(expr.line, f"Index {index} out of range for '{tuple_name}'"))
+                return None
+            if make_true:
+                right_val = self.solve_expression(right, make_true)
+                t_var[1][index] = (right_val[0], right_val[1])
+            return ('Bool', 'true')
 
         if type(left) == Expression:
             left = self.solve_expression(expression.left, make_true)
@@ -766,9 +800,6 @@ class Validator:
         if type(right) == Expression:
             right = self.solve_expression(expression.right, make_true)
             expression.right = right
-
-        operator = expression.operator
-        expr = expression
 
         if left is None:
             return None
@@ -809,6 +840,24 @@ class Validator:
                 return result
 
         if left[0] == 'VARIABLE':
+            if operator == 'ASSIGN':
+                # handle tuple field assignment: randomtuple's r = number
+                if isinstance(expression.left, Expression) and expression.left.operator == 'FIELDACCESS':
+                    tuple_name = expression.left.left[1]
+                    field_name = expression.left.right[1]
+                    t_var = self.variables.get(tuple_name)
+                    if t_var is None or t_var[0] != 'Namedtuple':
+                        self.errors.append(self._err(expr.line, f"'{tuple_name}' is not a namedtuple"))
+                        return None
+                    field = t_var[1].get(field_name)
+                    if field is None:
+                        self.errors.append(self._err(expr.line, f"No field '{field_name}' in '{tuple_name}'"))
+                        return None
+                    if make_true:
+                        right_val = self.solve_expression(expression.right, make_true)
+                        field[0] = right_val[0]
+                        field[1] = right_val[1]
+                    return ('Bool', 'true')
             if left[1].isupper() and operator != 'FIELDACCESS':
                 l_var = self.variables.get(left[1])
                 if l_var is None:
