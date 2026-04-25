@@ -2,15 +2,9 @@
 import MathAxioms
 
 Hypothesis:
-    let a be Nat = 3
-    let AB = 3
-    let number = 4
-    let randomtuple : Namedtuple = (r = 3, g = 200, b = 250)
-    randomtuple's r = 2
-    let anontuple : Tuple = (120, 121, 330)
-    anontuple[0] = 20
+    let a be Nat = 4
+    let ex be Namedtuple = (b = 3,)
 
 
 Proof:
-    randomtuple's r equals 2
-    anontuple[0] equals 21
+    ex's b equals a

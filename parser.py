@@ -386,12 +386,13 @@ class Parser:
                 elements = [first]
                 while self.current().type == 'COMMA':
                     self.advance()
+                    if self.current().type == 'RPAR':
+                        break
                     elements.append(self.expr(-1))
                 if self.current().type != 'RPAR':
                     print_error(tok.line_num, "Expected closing ')'", self.import_map)
                     sys.exit(1)
                 self.advance()
-
                 if all(isinstance(e, Expression) and e.operator == 'ASSIGN' for e in elements):
                     return 'NAMEDTUPLE', elements
                 return 'TUPLE', elements
@@ -400,6 +401,8 @@ class Parser:
                     print_error(tok.line_num, "Expected closing ')'", self.import_map)
                     sys.exit(1)
                 self.advance()
+                if isinstance(first, Expression) and first.operator == 'ASSIGN':
+                    return 'NAMEDTUPLE', [first]
                 return first
         else:
             print_error(tok.line_num, f"Expected operand, got {val_type}", self.import_map)

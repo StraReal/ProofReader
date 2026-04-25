@@ -11,8 +11,6 @@ class Validator:
         self.proof_defined_objects: Set[str] = set()
         self.operations = {}
         self.types = {}
-        self.known_equalities: Set[frozenset] = set()
-        self.known_inequalities: Set[frozenset] = set()
         self.axioms: Dict[str, AxiomDefinition] = {}
         self.errors: List[str] = []
         self.class_values: Dict[frozenset, Optional[float]] = {}
@@ -22,6 +20,8 @@ class Validator:
         self.known_greater_than = set()
         self.known_contains = set()
         self.contradictory = False
+        self.congruence_pools: Dict[int, Set[str]] = {}  # pool_id → set of ident names
+        self._next_pool_id: int = 1
 
         self.variables: Dict[str, [str, any]] = {}
 
@@ -48,7 +48,6 @@ class Validator:
         if hypothesis:
             for stmt in hypothesis.statements:
                 self.process_statement(stmt, is_hypothesis=True)
-            self.propagate_transitivity()
 
         for kind, item in ordered:
             if kind == 'axiom':
@@ -57,7 +56,6 @@ class Validator:
                 self.validate_theorem(item)
             elif kind == 'proof':
                 self.process_statement(item, is_hypothesis=False)
-                self.propagate_transitivity()
             elif kind == 'operation':
                 if item.left_type is None:
                     t = (item.operator, item.right_type)
@@ -158,93 +156,6 @@ class Validator:
                 return None
             total += val if sign == '+' else -val
         return total
-
-    def propagate_transitivity(self):
-        changed = True
-        while changed:
-            changed = False
-
-            eq_list = list(self.known_equalities)
-            for i, eq1 in enumerate(eq_list):
-                for eq2 in eq_list[i + 1:]:
-                    if eq1 & eq2:
-                        val1 = self.class_values.get(eq1)
-                        val2 = self.class_values.get(eq2)
-                        if val1 is not None and val2 is not None and val1 != val2:
-                            self.errors.append(f"Numeric conflict: {val1} vs {val2}")
-                            return
-                        merged_val = val1 if val1 is not None else val2
-                        union = eq1 | eq2
-                        self.known_equalities.discard(eq1)
-                        self.known_equalities.discard(eq2)
-                        self.class_values.pop(eq1, None)
-                        self.class_values.pop(eq2, None)
-                        self.known_equalities.add(union)
-                        if merged_val is not None:
-                            self.class_values[union] = merged_val
-                        changed = True
-                        break
-                if changed:
-                    break
-
-            ineq_list = list(self.known_inequalities)
-            for i, ineq1 in enumerate(ineq_list):
-                for ineq2 in ineq_list[i + 1:]:
-                    if ineq1 & ineq2:
-                        union = ineq1 | ineq2
-                        self.known_inequalities.discard(ineq1)
-                        self.known_inequalities.discard(ineq2)
-                        self.known_inequalities.add(union)
-                        changed = True
-                        break
-                if changed:
-                    break
-
-            for eq_set in self.known_equalities:
-                for ineq_set in self.known_inequalities:
-                    if eq_set & ineq_set:
-                        shared = eq_set & ineq_set
-                        self.errors.append(f"'{shared}' are both equal and unequal")
-
-            for eq_class in list(self.known_equalities):
-                if self.class_values.get(eq_class) is not None:
-                    continue
-                for member in eq_class:
-                    if isinstance(member, tuple):
-                        resolved = self.resolve_sum_value(member)
-                        if resolved is not None:
-                            self.class_values[eq_class] = resolved
-                            changed = True
-                            break
-
-            for eq_class in list(self.known_equalities):
-                val = self.class_values.get(eq_class)
-                if val is None:
-                    continue
-                for member in eq_class:
-                    if isinstance(member, str):
-                        # Find if this string member is also in another class as a sum key
-                        for other_class in list(self.known_equalities):
-                            if other_class == eq_class:
-                                continue
-                            if member in other_class:
-                                other_val = self.class_values.get(other_class)
-                                if other_val is None:
-                                    self.class_values.pop(other_class, None)
-                                    merged = eq_class | other_class
-                                    self.known_equalities.discard(eq_class)
-                                    self.known_equalities.discard(other_class)
-                                    self.known_equalities.add(merged)
-                                    self.class_values[merged] = val
-                                    changed = True
-                                    break
-                                elif other_val != val:
-                                    self.errors.append(f"Numeric conflict: '{member}' = {val} vs {other_val}")
-                                    return
-                    if changed:
-                        break
-                if changed:
-                    break
 
     def get_equality_value(self, obj1, obj2, inequality=False):
         """
@@ -357,64 +268,6 @@ class Validator:
 
         # Empty sum = 0
         return 0
-
-    def _check_object_equality(self, obj1, obj2, inequality=False):
-        """Check if two object references are equal/unequal."""
-        obj1 = self.normalize_object(obj1)
-        obj2 = self.normalize_object(obj2)
-        left_class = None
-        right_class = None
-        left_ineq_class = None
-        right_ineq_class = None
-
-        for eq_class in self.known_equalities:
-            if obj1 in eq_class:
-                left_class = eq_class
-            if obj2 in eq_class:
-                right_class = eq_class
-
-        for ineq_class in self.known_inequalities:
-            if obj1 in ineq_class:
-                left_ineq_class = ineq_class
-            if obj2 in ineq_class:
-                right_ineq_class = ineq_class
-
-        same_eq_class = (left_class is not None and right_class is not None and
-                         left_class == right_class)
-        same_ineq_class = (left_ineq_class is not None and right_ineq_class is not None and
-                           left_ineq_class == right_ineq_class)
-
-        if inequality:
-            if same_eq_class:
-                return 2
-            if same_ineq_class:
-                return 0
-            return 1
-        else:
-            if same_eq_class:
-                return 0
-            if same_ineq_class:
-                return 2
-            return 1
-
-    def _check_numeric_equality(self, obj, expected_value):
-        """Check if an object equals an expected numeric value."""
-        norm = self.normalize_object(obj)
-
-        left_class = None
-        for eq_class in self.known_equalities:
-            if norm in eq_class or obj in eq_class:
-                left_class = eq_class
-                break
-
-        actual_value = self.class_values.get(left_class)
-
-        if actual_value is None:
-            return 1
-        elif actual_value == expected_value:
-            return 0
-        else:
-            return 2
 
     def resolve_numvar_binding(self, value: str) -> Optional[float]:
         try:
@@ -794,6 +647,26 @@ class Validator:
                 t_var[1][index] = (right_val[0], right_val[1])
             return ('Bool', 'true')
 
+        if operator == 'ASSIGN' and isinstance(left, tuple) and isinstance(right, tuple):
+            if left[0] == 'VARIABLE' and right[0] == 'VARIABLE' and left[1].isupper() and right[1].isupper() and len(
+                    left[1]) != 2:
+                l_var = self.variables.get(left[1])
+                r_var = self.variables.get(right[1])
+                if l_var is None:
+                    self.errors.append(self._err(expr.line, f"Undefined ident '{left[1]}'"))
+                    return None
+                if r_var is None:
+                    self.errors.append(self._err(expr.line, f"Undefined ident '{right[1]}'"))
+                    return None
+                if make_true:
+                    l_pool = l_var[1]['_congruence']
+                    r_pool = r_var[1]['_congruence']
+                    if l_pool != r_pool:
+                        self.congruence_pools[l_pool].update(self.congruence_pools.pop(r_pool))
+                        for ident in self.congruence_pools[l_pool]:
+                            self.variables[ident][1]['_congruence'] = l_pool
+                return ('Bool', 'true')
+
         if type(left) == Expression:
             left = self.solve_expression(expression.left, make_true)
             expression.left = left
@@ -805,6 +678,7 @@ class Validator:
             return None
         if right is None:
             return None
+
         if right == 'none_for_unary':
             if left[0] == 'VARIABLE':
                 x_var = self.variables.get(left[1])
@@ -840,24 +714,6 @@ class Validator:
                 return result
 
         if left[0] == 'VARIABLE':
-            if operator == 'ASSIGN':
-                # handle tuple field assignment: randomtuple's r = number
-                if isinstance(expression.left, Expression) and expression.left.operator == 'FIELDACCESS':
-                    tuple_name = expression.left.left[1]
-                    field_name = expression.left.right[1]
-                    t_var = self.variables.get(tuple_name)
-                    if t_var is None or t_var[0] != 'Namedtuple':
-                        self.errors.append(self._err(expr.line, f"'{tuple_name}' is not a namedtuple"))
-                        return None
-                    field = t_var[1].get(field_name)
-                    if field is None:
-                        self.errors.append(self._err(expr.line, f"No field '{field_name}' in '{tuple_name}'"))
-                        return None
-                    if make_true:
-                        right_val = self.solve_expression(expression.right, make_true)
-                        field[0] = right_val[0]
-                        field[1] = right_val[1]
-                    return ('Bool', 'true')
             if left[1].isupper() and operator != 'FIELDACCESS':
                 l_var = self.variables.get(left[1])
                 if l_var is None:
@@ -867,14 +723,14 @@ class Validator:
                 left_value = l_var[1]
                 match len(left[1]):
                     case 1:
-                        l_type = 'Int'
-                        left_value = left_value['_congruence'][1]
+                        l_type = 'special_type_pool'
+                        left_value = self.congruence_pools[left_value['_congruence']]
                     case 2:
                         l_type = 'Int'
                         left_value = left_value['length'][1]
                     case n if n > 2:
-                        l_type = 'Int'
-                        left_value = left_value['_congruence'][1]
+                        l_type = 'special_type_pool'
+                        left_value = self.congruence_pools[left_value['_congruence']]
             else:
                 l_var = self.variables.get(left[1])
                 if l_var is None:
@@ -896,9 +752,6 @@ class Validator:
                 if l_type != 'Namedtuple':
                     self.errors.append(self._err(expr.line, f"Can't access field of object of type {l_type}."))
                     return None
-                if left_value.get(right[1]) is None:
-                    self.errors.append(self._err(expr.line, f"Can't access field {right[1]} of object {left[1]} where it doesn't exist."))
-                    return None
                 field = left_value.get(right[1])
                 if field is None:
                     self.errors.append(self._err(expr.line, f"Can't access field '{right[1]}' of object '{left[1]}'."))
@@ -908,14 +761,32 @@ class Validator:
                 if l_type != 'Tuple':
                     self.errors.append(self._err(expr.line, f"Can't access index of object of type {l_type}."))
                     return None
-                if left_value[right[1]] is None:
-                    self.errors.append(self._err(expr.line, f"Can't access index {right[1]} of object {left[1]} where it doesn't exist."))
+                index = right[1] - 1
+                if index < 0 or index >= len(left_value):
+                    self.errors.append(self._err(expr.line, f"Index {right[1]} out of range for '{left[1]}'."))
                     return None
-                element = left_value[right[1] - 1]  # 1-indexed
+                element = left_value[index]
                 if element is None:
                     self.errors.append(self._err(expr.line, f"Can't access index {right[1]} of '{left[1]}'."))
                     return None
                 return (element[0], element[1])
+            elif right[1].isupper() and operator != 'FIELDACCESS':
+                r_var = self.variables.get(right[1])
+                if r_var is None:
+                    self.errors.append(self._err(expr.line, f"Undefined ident '{right[1]}'."))
+                    return None
+                r_type = r_var[0]
+                right_value = r_var[1]
+                match len(right[1]):
+                    case 1:
+                        r_type = 'special_type_pool'
+                        right_value = self.congruence_pools[right_value['_congruence']]
+                    case 2:
+                        r_type = 'Int'
+                        right_value = right_value['length'][1]
+                    case n if n > 2:
+                        r_type = 'special_type_pool'
+                        right_value = self.congruence_pools[right_value['_congruence']]
             else:
                 r_var = self.variables.get(right[1])
                 if r_var is None:
@@ -923,7 +794,6 @@ class Validator:
                     return None
                 r_type = r_var[0]
                 right_value = r_var[1]
-
         else:
             r_type = right[0].capitalize()
             if right[0].upper().startswith('LIT'):
@@ -933,8 +803,9 @@ class Validator:
         if left_value is None or right_value is None:
             if operator != 'ASSIGN':
                 both_unkn = left_value is None and right_value is None
-                given_str = (left[1] if left_value is None else '') + (', ' if both_unkn else '') + (
-                    right[1] if right_value is None else '')
+                left_str = str(left[1]) if left_value is None else ''
+                right_str = str(right[1]) if right_value is None else ''
+                given_str = left_str + (', ' if both_unkn else '') + right_str
                 self.errors.append(
                     self._err(expr.line, f"Cannot calculate expressions with unknowns (given: {given_str})"))
                 return None
@@ -974,15 +845,10 @@ class Validator:
                     finally:
                         self.variables.pop('first', None)
                         self.variables.pop('second', None)
-
                     if result is None:
                         self.errors.append(self._err(expr.line, f"Operation {operator} produced no result"))
                         return None
                     return result
-        elif operator == 'FIELDACCESS':
-            return left_value[right_value][1]
-        elif operator == 'INDEXACCESS':
-            return left_value[right_value]
         else:
             t = self.normalize_comparison(l_type, operator, r_type)
             op_def = self.operations.get(t)
@@ -1000,6 +866,11 @@ class Validator:
                         self.errors.append(self._err(expr.line, f"Operation {operator} produced no result"))
                         return None
                     return result
+    def _new_pool(self, ident_name: str) -> int:
+        pid = self._next_pool_id
+        self._next_pool_id += 1
+        self.congruence_pools[pid] = {ident_name}
+        return pid
 
     def process_statement(self, stmt: Statement, is_hypothesis: bool):
         make_true = is_hypothesis or (stmt.in_let and not self.last_let_failed)
@@ -1053,11 +924,11 @@ class Validator:
                         value = self.solve_expression(value, make_true)
                 match len(stmt_object[1]):
                     case 1:
-                        self.variables[stmt_object[1]] = ['Namedtuple', {'_congruent': ['Int', value], 'radius': ['Int', None]}]
+                        self.variables[stmt_object[1]] = ['Namedtuple', {'_congruence': self._new_pool(stmt_object[1]), 'radius': ['Int', None]}]
                     case 2:
                         self.variables[stmt_object[1]] = ['Namedtuple', {'length': ['Int', value]}]
                     case n if n > 2:
-                        self.variables[stmt_object[1]] = ['Namedtuple', {'_congruent': ['Int', value], 'area': ['Int', None], 'perimeter': ['Int', None]}]
+                        self.variables[stmt_object[1]] = ['Namedtuple', {'_congruence': self._new_pool(stmt_object[1]), 'area': ['Int', None], 'perimeter': ['Int', None]}]
             else:
                 pass
 
@@ -1156,9 +1027,7 @@ class Validator:
             return
 
         if stmt.type == 'expression':
-            print(stmt.objects[0])
             res = self.solve_expression(stmt.objects[0], make_true)
-            print(res)
             if res is not None:
                 if res[0] == 'Bool':
                     if make_true:
