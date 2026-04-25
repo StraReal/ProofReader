@@ -75,11 +75,9 @@ class Validator:
 
         for stmt in theorem.given:
             child.process_statement(stmt, is_hypothesis=True)
-        child.propagate_transitivity()
 
         for stmt in theorem.proof:
             child.process_statement(stmt, is_hypothesis=False)
-            child.propagate_transitivity()
 
         # verify then is valid
         for then_stmt in theorem.then:
@@ -315,206 +313,6 @@ class Validator:
                 symbolic.append((sign, name))
         return total, symbolic
 
-    def _find_sum_class(self, key):
-        if not isinstance(key, tuple) or not key or not isinstance(key[0], tuple):
-            return next((eq for eq in self.known_equalities if key in eq), None)
-
-        cls = next((eq for eq in self.known_equalities if key in eq), None)
-        if cls is not None:
-            return cls
-
-        candidates = []
-        for sign, name in key:
-            alts = [name]
-            for eq_class in self.known_equalities:
-                if name in eq_class:
-                    alts += [x for x in eq_class if isinstance(x, str) and x != name]
-            candidates.append([(sign, alt) for alt in alts])
-
-        from itertools import product
-        for combo in product(*candidates):
-            candidate_key = tuple(sorted(combo))
-            cls = next((eq for eq in self.known_equalities if candidate_key in eq), None)
-            if cls is not None:
-                return cls
-
-        return None
-
-    def _store_sum(self, key, value):
-        """
-        Record  key = value  in known_equalities / class_values.
-        key  : tuple of (sign, name), the canonical symbolic side
-        value: float
-        """
-        cls = self._find_sum_class(key)
-        if cls is None:
-            cls = frozenset([key])
-            self.known_equalities.add(cls)
-        self.class_values[cls] = value
-
-    def _store_sum_symbolic(self, left_key, right_key):
-        """
-        Record  left_key = right_key  with no numeric value yet —
-        merge the two keys into one equality class.
-        """
-        left_cls = self._find_sum_class(left_key)
-        right_cls = self._find_sum_class(right_key)
-
-        if left_cls is None:
-            left_cls = frozenset([left_key])
-        if right_cls is None:
-            right_cls = frozenset([right_key])
-
-        self.known_equalities.discard(left_cls)
-        self.known_equalities.discard(right_cls)
-        merged = left_cls | right_cls
-        self.known_equalities.add(merged)
-        val = self.class_values.pop(left_cls, None) or self.class_values.pop(right_cls, None)
-        if val is not None:
-            self.class_values[merged] = val
-
-    def _process_sum_assignment(self, stmt, is_hypothesis):
-        """AB + CD = 50"""
-        expected_str = "true" if stmt.goal else "false"
-        canon = self.normalize_signed_sum(stmt.objects[0])
-        right = float(stmt.objects[1])
-        make_true = is_hypothesis or (stmt.in_let and not self.last_let_failed)
-        if not self._check_defined(canon, stmt.line):
-            return
-
-        sub = self._substitute_numeric_values(canon)
-        numeric, sym = self._split_numeric_symbolic(sub)
-        net = right - numeric
-
-        if not sym:
-            ok = (numeric == right)
-            if not ok:
-                self.errors.append(
-                    self._err(stmt.line, f"'{canon} = {right} is {expected_str}' is {'false' if not is_hypothesis else 'conflicting'}"))
-            return
-
-        key = tuple(sym)
-        if make_true:
-            self._store_sum(key, net)
-            # Link single named object to the sum class
-            if len(sym) == 1 and sym[0][0] == '+':
-                name = sym[0][1]
-                cls = self._find_sum_class(key)
-                if cls is not None:
-                    self.known_equalities.discard(cls)
-                    new_cls = cls | frozenset([name])
-                    self.known_equalities.add(new_cls)
-                    self.class_values.pop(cls, None)
-                    self.class_values[new_cls] = net
-        else:
-            cls = self._find_sum_class(key)
-            val = self.class_values.get(cls)
-            matches = (val is not None and val == net)
-            if matches == stmt.goal:
-                if len(sym) == 1 and sym[0][0] == '+':
-                    name = sym[0][1]
-                    self.known_equalities.discard(cls)
-                    new_cls = cls | frozenset([name])
-                    self.known_equalities.add(new_cls)
-                    self.class_values.pop(cls, None)
-                    self.class_values[new_cls] = val
-            else:
-                if val is None:
-                    self.errors.append(self._err(stmt.line, f"'{key} = {net} is {expected_str}' is unproven"))
-                else:
-                    self.errors.append(self._err(stmt.line,
-                                                 f"'{key} = {net} is {expected_str}' is false"))
-
-    def _canonicalize_sum_key(self, key):
-        """Replace each term in a sum key with the canonical representative of its equality class."""
-        result = []
-        for sign, name in key:
-            # Find if this name is in any equality class with another sum key member
-            canonical = name
-            for eq_class in self.known_equalities:
-                if name in eq_class:
-                    # Use the lexicographically smallest member as canonical
-                    candidates = [x for x in eq_class if isinstance(x, str)]
-                    if candidates:
-                        canonical = min(candidates)
-                    break
-            result.append((sign, canonical))
-        return tuple(sorted(result))
-
-    def _process_sum_equality(self, stmt, is_hypothesis):
-        """AB + CD = EF - GH"""
-        left_canon = self.normalize_signed_sum(stmt.objects[0])
-        right_canon = self.normalize_signed_sum(stmt.objects[1])
-        make_true = is_hypothesis or (stmt.in_let and not self.last_let_failed)
-
-        if not self._check_defined(left_canon, stmt.line): return
-        if not self._check_defined(right_canon, stmt.line): return
-
-        left_sub = self._substitute_numeric_values(left_canon)
-        right_sub = self._substitute_numeric_values(right_canon)
-        left_num, left_sym = self._split_numeric_symbolic(left_sub)
-        right_num, right_sym = self._split_numeric_symbolic(right_sub)
-
-        # Bring all numerics to the right:
-        #   left_sym - right_sym = right_num - left_num
-        net_numeric = right_num - left_num
-        flipped_right = [('+' if s == '-' else '-', n) for s, n in right_sym]
-        combined_sym = tuple(left_sym) + tuple(flipped_right)
-
-        if not combined_sym:
-            ok = (net_numeric == 0.0)
-            if not (ok == stmt.goal):
-                expected_str = "true" if stmt.goal else "false"
-                self.errors.append(self._err(stmt.line,
-                                             f"'{left_canon} = {right_canon}' is {'true' if ok else 'false'}, expected {expected_str}"))
-            return
-
-        if combined_sym[0][0] == '-':
-            combined_sym = tuple(sorted(('+' if s == '-' else '-', n) for s, n in combined_sym))
-            net_numeric = -net_numeric
-        else:
-            combined_sym = tuple(sorted(combined_sym))
-        combined_sym = self._canonicalize_sum_key(combined_sym)
-
-        left_key = tuple(left_sym)
-        right_key = tuple(right_sym)
-
-        if make_true:
-            if not left_sym and right_sym:
-                self._store_sum(right_key, -net_numeric)
-            elif left_sym and not right_sym:
-                self._store_sum(left_key, net_numeric)
-            else:
-                self._store_sum_symbolic(left_key, right_key)
-        else:
-            cls = self._find_sum_class(combined_sym)
-            val = self.class_values.get(cls)
-            if val is not None:
-                matches = (val == net_numeric)
-                if matches == stmt.goal:
-                    if len(left_sym) == 1 and left_sym[0][0] == '+' and not right_sym:
-                        name = left_sym[0][1]
-                        self.known_equalities.discard(cls)
-                        new_cls = cls | frozenset([name])
-                        self.known_equalities.add(new_cls)
-                        self.class_values.pop(cls, None)
-                        self.class_values[new_cls] = val
-                    return
-                else:
-                    expected_str = "true" if stmt.goal else "false"
-                    self.errors.append(self._err(stmt.line,
-                                                 f"'{left_canon} = {right_canon}' is {'true' if matches else 'false'}, expected {expected_str}"))
-            elif net_numeric == 0.0:
-                lc = self._find_sum_class(tuple(left_sym))
-                rc = self._find_sum_class(tuple(right_sym))
-                if (lc is not None and lc == rc) == stmt.goal:
-                    return
-                self.errors.append(self._err(stmt.line,
-                                             f"'{left_canon} = {right_canon}' is unproven as {'true' if stmt.goal else 'false'}"))
-            else:
-                self.errors.append(self._err(stmt.line,
-                                             f"'{left_canon} = {right_canon}' is unproven as {'true' if stmt.goal else 'false'}"))
-
     def _concretize_statement(self, stmt, bindings):
         """Return a new Statement with all variables substituted with bindings."""
         if stmt.type in ('equality', 'inequality'):
@@ -714,23 +512,34 @@ class Validator:
                 return result
 
         if left[0] == 'VARIABLE':
-            if left[1].isupper() and operator != 'FIELDACCESS':
-                l_var = self.variables.get(left[1])
+            is_ident = left[1].isupper()
+            is_angle = left[1].startswith('ang') and left[1][3:].isupper() and len(left[1]) > 3
+            if (is_ident or is_angle) and operator != 'FIELDACCESS':
+                left = left[0], self.normalize_object(left[1])
+                name = left[1]
+                l_var = self.variables.get(name)
                 if l_var is None:
-                    self.errors.append(self._err(expr.line, f"Undefined ident '{left[1]}'."))
-                    return None
+                    if is_angle or all(ch in self.variables for ch in left[1]):
+                        l_var = self._create_ident(name)
+                    else:
+                        self.errors.append(self._err(expr.line, f"Undefined ident '{left[1]}'."))
+                        return None
                 l_type = l_var[0]
                 left_value = l_var[1]
-                match len(left[1]):
-                    case 1:
-                        l_type = 'special_type_pool'
-                        left_value = self.congruence_pools[left_value['_congruence']]
-                    case 2:
-                        l_type = 'Int'
-                        left_value = left_value['length'][1]
-                    case n if n > 2:
-                        l_type = 'special_type_pool'
-                        left_value = self.congruence_pools[left_value['_congruence']]
+                if is_angle:
+                    l_type = 'Int'
+                    left_value = left_value['degrees'][1]
+                else:
+                    match len(name):
+                        case 1:
+                            l_type = 'special_type_pool'
+                            left_value = self.congruence_pools[left_value['_congruent']]
+                        case 2:
+                            l_type = 'Int'
+                            left_value = left_value['length'][1]
+                        case n if n > 2:
+                            l_type = 'special_type_pool'
+                            left_value = self.congruence_pools[left_value['_congruent']]
             else:
                 l_var = self.variables.get(left[1])
                 if l_var is None:
@@ -770,30 +579,42 @@ class Validator:
                     self.errors.append(self._err(expr.line, f"Can't access index {right[1]} of '{left[1]}'."))
                     return None
                 return (element[0], element[1])
-            elif right[1].isupper() and operator != 'FIELDACCESS':
-                r_var = self.variables.get(right[1])
-                if r_var is None:
-                    self.errors.append(self._err(expr.line, f"Undefined ident '{right[1]}'."))
-                    return None
-                r_type = r_var[0]
-                right_value = r_var[1]
-                match len(right[1]):
-                    case 1:
-                        r_type = 'special_type_pool'
-                        right_value = self.congruence_pools[right_value['_congruence']]
-                    case 2:
-                        r_type = 'Int'
-                        right_value = right_value['length'][1]
-                    case n if n > 2:
-                        r_type = 'special_type_pool'
-                        right_value = self.congruence_pools[right_value['_congruence']]
             else:
-                r_var = self.variables.get(right[1])
-                if r_var is None:
-                    self.errors.append(self._err(expr.line, f"Undefined variable '{right[1]}'."))
-                    return None
-                r_type = r_var[0]
-                right_value = r_var[1]
+                is_ident = right[1].isupper()
+                is_angle = right[1].startswith('ang') and right[1][3:].isupper() and len(right[1]) > 3
+                if (is_ident or is_angle) and operator != 'FIELDACCESS':
+                    right = right[0], self.normalize_object(right[1])
+                    name = right[1]
+                    r_var = self.variables.get(name)
+                    if r_var is None:
+                        if is_angle or all(ch in self.variables for ch in right[1]):
+                            r_var = self._create_ident(name)
+                        else:
+                            self.errors.append(self._err(expr.line, f"Undefined ident '{right[1]}'."))
+                            return None
+                    r_type = r_var[0]
+                    right_value = r_var[1]
+                    if is_angle:
+                        r_type = 'Int'
+                        right_value = right_value['degrees'][1]
+                    else:
+                        match len(name):
+                            case 1:
+                                r_type = 'special_type_pool'
+                                right_value = self.congruence_pools[right_value['_congruence']]
+                            case 2:
+                                r_type = 'Int'
+                                right_value = right_value['length'][1]
+                            case n if n > 2:
+                                r_type = 'special_type_pool'
+                                right_value = self.congruence_pools[right_value['_congruence']]
+                else:
+                    r_var = self.variables.get(right[1])
+                    if r_var is None:
+                        self.errors.append(self._err(expr.line, f"Undefined variable '{right[1]}'."))
+                        return None
+                    r_type = r_var[0]
+                    right_value = r_var[1]
         else:
             r_type = right[0].capitalize()
             if right[0].upper().startswith('LIT'):
@@ -866,21 +687,38 @@ class Validator:
                         self.errors.append(self._err(expr.line, f"Operation {operator} produced no result"))
                         return None
                     return result
+
     def _new_pool(self, ident_name: str) -> int:
         pid = self._next_pool_id
         self._next_pool_id += 1
         self.congruence_pools[pid] = {ident_name}
         return pid
 
+    def _create_ident(self, name: str) -> list:
+        name = self.normalize_object(name)
+        if name.startswith('ang'):
+            entry = ['Namedtuple', {'degrees': ['Int', None]}]
+        else:
+            pid = self._new_pool(name)
+            match len(name):
+                case 1:
+                    entry = ['Namedtuple', {'_congruence': pid, 'radius': ['Int', None]}]
+                case 2:
+                    entry = ['Namedtuple', {'length': ['Int', None]}]
+                case _:
+                    entry = ['Namedtuple', {'_congruence': pid, 'area': ['Int', None], 'perimeter': ['Int', None]}]
+        self.variables[name] = entry
+        return entry
+
     def process_statement(self, stmt: Statement, is_hypothesis: bool):
         make_true = is_hypothesis or (stmt.in_let and not self.last_let_failed)
         if self.contradictory:
             return
-        if stmt.type == 'axiom_application':
+        elif stmt.type == 'axiom_application':
             self.last_axiom_failed = not self.apply_axiom(stmt)
             return
 
-        if stmt.type == 'let':
+        elif stmt.type == 'let':
             self.last_let_failed = False
             stmt_object = stmt.objects[0]
             value = stmt.value
@@ -892,141 +730,94 @@ class Validator:
                         if value[0].startswith('LIT'):
                             def_type = value[0][3:].capitalize()
                             value = value[1]
-                        else:
-                            if value[0] == 'NAMEDTUPLE':
-                                fields = {}
-                                for field_expr in value[1]:
-                                    field_name = field_expr.left[1]
-                                    field_value = self.solve_expression(field_expr.right, make_true)
-                                    fields[field_name] = [field_value[0] if field_value else None,
-                                                          field_value[1] if field_value else None]
-                                self.variables[stmt_object[1]] = ['Namedtuple', fields]
-                                return
-                            elif value[0] == 'TUPLE':
-                                fields = []
-                                for field in value[1]:
-                                    field_value = self.solve_expression(field, make_true)
-                                    fields.append([field_value[0] if field_value else None,
-                                                          field_value[1] if field_value else None])
-                                self.variables[stmt_object[1]] = ['Tuple', fields]
-                                return
+                        elif value[0] == 'NAMEDTUPLE':
+                            fields = {}
+                            for field_expr in value[1]:
+                                field_name = field_expr.left[1]
+                                field_value = self.solve_expression(field_expr.right, make_true)
+                                fields[field_name] = [field_value[0] if field_value else None,
+                                                      field_value[1] if field_value else None]
+                            self.variables[stmt_object[1]] = ['Namedtuple', fields]
+                            return
+                        elif value[0] == 'TUPLE':
+                            fields = []
+                            for field in value[1]:
+                                field_value = self.solve_expression(field, make_true)
+                                fields.append([field_value[0] if field_value else None,
+                                               field_value[1] if field_value else None])
+                            self.variables[stmt_object[1]] = ['Tuple', fields]
+                            return
                     else:
                         value = self.solve_expression(value, make_true)
                 self.variables[stmt_object[1]] = [def_type, value]
+
             elif stmt_object[0] == 'IDENT':
+                value_to_assign = None
                 if value is not None:
                     if type(value) is tuple:
                         if value[0].startswith('LIT'):
-                            value = value[1]
+                            value_to_assign = value[1]
                         else:
-                            value = self.variables[value[1]][1]
+                            ref = self.variables.get(value[1])
+                            if ref is None and value[1].isupper() and all(ch in self.variables for ch in value[1]):
+                                ref = self._create_ident(value[1])
+                            if ref is None:
+                                self.errors.append(self._err(stmt.line, f"Undefined variable '{value[1]}'"))
+                                return
+                            value_to_assign = ref[1]
                     else:
-                        value = self.solve_expression(value, make_true)
-                match len(stmt_object[1]):
-                    case 1:
-                        self.variables[stmt_object[1]] = ['Namedtuple', {'_congruence': self._new_pool(stmt_object[1]), 'radius': ['Int', None]}]
-                    case 2:
-                        self.variables[stmt_object[1]] = ['Namedtuple', {'length': ['Int', value]}]
-                    case n if n > 2:
-                        self.variables[stmt_object[1]] = ['Namedtuple', {'_congruence': self._new_pool(stmt_object[1]), 'area': ['Int', None], 'perimeter': ['Int', None]}]
+                        resolved = self.solve_expression(value, make_true)
+                        value_to_assign = resolved[1] if resolved else None
+
+                ident = self._create_ident(stmt_object[1])
+
+                if value_to_assign is not None:
+                    if len(stmt_object[1]) == 2:
+                        ident[1]['length'][1] = value_to_assign
+
+            elif stmt_object[0] == 'ANGLE':
+                value_to_assign = None
+                if value is not None:
+                    if type(value) is tuple:
+                        if value[0].startswith('LIT'):
+                            value_to_assign = value[1]
+                        else:
+                            ref = self.variables.get(value[1])
+                            if ref is None and value[1].isupper() and all(ch in self.variables for ch in value[1]):
+                                ref = self._create_ident(value[1])
+                            if ref is None:
+                                self.errors.append(self._err(stmt.line, f"Undefined variable '{value[1]}'"))
+                                return
+                            value_to_assign = ref[1]
+                    else:
+                        resolved = self.solve_expression(value, make_true)
+                        value_to_assign = resolved[1] if resolved else None
+
+                ident = self._create_ident(stmt_object[1])
+
+                if value_to_assign is not None:
+                    ident[1]['degrees'][1] = value_to_assign
+                    print(ident)
+
+                print(ident, self.variables)
+
             else:
                 pass
 
-        if stmt.type == 'typehint':
+        elif stmt.type == 'typehint':
             variable = stmt.objects[0]
             o_type = stmt.objects[1]
-
             var = self.variables.get(variable)
             if var is None:
-                var = None, None
-            self.variables[variable] = [o_type, var[1]]
-
-        if stmt.type == 'chain_conclusion':
-            left_ops, right_ops, right_type, right_val = stmt.objects
-            if right_val is not None and right_type in ('NUMBER', 'NUMVAR'):
-                if len(left_ops) == 1:
-                    left_class = next((eq for eq in self.known_equalities if left_ops[0][1] in eq), None)
-                    if left_class is None:
-                        left_class = frozenset([left_ops[0][1]])
-                        self.known_equalities.add(left_class)
-                    self.class_values[left_class] = float(right_val)
-                else:
-                    self._store_sum(tuple(left_ops), float(right_val))
+                self.variables[variable] = [o_type, None]
             else:
-                if len(left_ops) == 1 and len(right_ops) == 1:
-                    left_name = self.normalize_object(left_ops[0][1])
-                    right_name = self.normalize_object(right_ops[0][1])
-                    self.known_equalities.add(frozenset([left_name, right_name]))
-                else:
-                    self._store_sum_symbolic(tuple(left_ops), tuple(right_ops))
-            return
+                var[0] = o_type
 
-        if stmt.type == 'contains':
-            segment = stmt.objects[0]
-            point = stmt.objects[1]
-            if make_true:
-                self.known_contains.add((segment, point))
-            else:
-                if (segment, point) not in self.known_contains and point not in segment:
-                    self.errors.append(self._err(stmt.line, f"'{point} in {segment}' is unproven"))
-
-        if stmt.type == 'equality':
-            left = self.normalize_object(stmt.objects[0])
-            right = self.normalize_object(stmt.objects[1])
-            result = self.get_equality_value(left, right)
-            pair = frozenset([left, right])
-            expected_str = "true" if stmt.goal else "false"
-
-            if result == 11:
-                self.errors.append(self._err(stmt.line, self.defined_objects))
-                self.errors.append(self._err(stmt.line, f"Object '{left}' not defined"))
-                return
-            if result == 12:
-                self.errors.append(self._err(stmt.line, f"Object '{right}' not defined"))
-                return
-
-            if make_true:
-                if stmt.goal:
-                    self.known_equalities.add(pair)
-                else:
-                    self.known_inequalities.add(pair)
-            else:
-                if result == 1: self.errors.append(self._err(stmt.line, f"'{left} = {right} is {'true' if stmt.goal else 'false'}' is unproven"))
-                elif bool(result) == stmt.goal : self.errors.append(self._err(stmt.line, f"'{left} = {right}' is {'false' if stmt.goal else 'true'}, expected {expected_str}"))
-            return
-
-        #if stmt.type == 'assignment':
-            left = self.normalize_object(stmt.objects[0])
-            right = stmt.objects[1]
-            result = self.get_equality_value(left, float(right))
-            if result == 11:
-                self.errors.append(self._err(stmt.line, f"Object '{left}' not defined"))
-                return
-
-            left_class = self._find_sum_class(left)
-            if make_true:
-                if left_class is None:
-                    left_class = frozenset([left])
-                    self.known_equalities.add(left_class)
-                self.class_values[left_class] = float(right)
-            else:
-                if result == 1: self.errors.append(self._err(stmt.line, f"'{left} = {right} is {'true' if stmt.goal else 'false'}' is unproven"))
-                elif bool(result) == stmt.goal: self.errors.append(self._err(stmt.line, f"'{left} = {right} is {'true' if stmt.goal else 'false'}' is false"))
-            return
-
-        if stmt.type == 'sum_assignment':
-            self._process_sum_assignment(stmt, is_hypothesis)
-            return
-
-        if stmt.type == 'sum_equality':
-            self._process_sum_equality(stmt, is_hypothesis)
-            return
-
-        if stmt.type == 'print':
+        elif stmt.type == 'print':
             print(stmt.objects[0])
             return
 
-        if stmt.type == 'expression':
+        elif stmt.type == 'expression':
             res = self.solve_expression(stmt.objects[0], make_true)
             if res is not None:
                 if res[0] == 'Bool':
@@ -1037,6 +828,9 @@ class Validator:
                         if res[1] == 'false':
                             self.errors.append(self._err(stmt.line,
                                                          f"'{stmt.objects[1]}' is false"))
+
+        else:
+            print(f"Unknown statement type {stmt.type}")
 
     def _build_bindings(self, axiom, raw_args):
         from itertools import permutations, product
@@ -1096,27 +890,10 @@ class Validator:
             elif hyp.type == 'let_numvar':
                 continue
 
-            elif hyp.type == 'equality':
-                left = self.normalize_object(self.substitute_variables(hyp.objects[0], bindings))
-                right = self.normalize_object(self.substitute_variables(hyp.objects[1], bindings))
-                if hyp.goal:
-                    if not any(left in eq and right in eq for eq in self.known_equalities):
-                        return False
-                else:
-                    if not any(left in eq and right in eq for eq in self.known_inequalities):
-                        return False
-
             elif hyp.type == 'inequality':
                 left = self.normalize_object(self.substitute_variables(hyp.objects[0], bindings))
                 right = self.normalize_object(self.substitute_variables(hyp.objects[1], bindings))
                 if not any(left in iq and right in iq for iq in self.known_inequalities):
-                    return False
-
-            elif hyp.type == 'assignment':
-                left = self.normalize_object(self.substitute_variables(hyp.objects[0], bindings))
-                expected = float(self.substitute_variables(hyp.objects[1], bindings))
-                cls = next((eq for eq in self.known_equalities if left in eq), None)
-                if self.class_values.get(cls) != expected:
                     return False
 
             elif hyp.type == 'sum_assignment':

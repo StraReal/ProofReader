@@ -3,8 +3,11 @@ import MathAxioms
 
 Hypothesis:
     let a be Nat = 4
-    let ex be Namedtuple = (b = 3,)
-
+    let ex be Namedtuple = (b = 4,c = 5)
+    let D
+    let angABC = 5
+    let angABD = 5
 
 Proof:
+    angABC's degrees equals ex's c
     ex's b equals a

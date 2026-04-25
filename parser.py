@@ -375,6 +375,10 @@ class Parser:
             self.advance()
             return 'VARIABLE', value
 
+        elif val_type == 'ANGLE':
+            self.advance()
+            return 'VARIABLE', value
+
         elif val_type in OP_MAP and OP_MAP[val_type].prefix is not None:
             self.advance()
             return Expression(val_type, self.expr(OP_MAP[val_type].prefix), 'none_for_unary', line=self.current().line_num)
@@ -455,6 +459,11 @@ class Parser:
                     self.advance()
                     value = self.expr()
                 statements.append(Statement('let', [(name_type, name)], value=value, line=line))
+            elif name_type == 'ANGLE':
+                if self.current().type == 'ASSIGN':
+                    self.advance()
+                    value = self.expr()
+                statements.append(Statement('let', [(name_type, name)], value=value, line=line))
 
         elif self.current().type == 'NUMVAR':
             left = self.current().value
@@ -528,68 +537,14 @@ class Parser:
             s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
             statements.append(s)
 
-        elif self.current().type == 'ANGLE':
-            left_angle = self.current().value
-            left_type = self.current().type
-            self.advance()
-            left_operands = self.parse_sum_operands(left_angle, (left_type,))
-            if self.current().type in ('ASSIGN', 'EQUALS'):
-                sides = [(left_operands, None, None)]
-                while self.current().type in ('ASSIGN', 'EQUALS'):
-                    self.advance()
-                    rhs = self.parse_rhs(left_type, line)
-                    if rhs[0] == 'single':
-                        _, right, right_type = rhs
-                        sides.append(([('+', right)], right_type, right))
-                    else:
-                        _, right_operands = rhs
-                        sides.append((right_operands, None, None))
-                for i in range(len(sides) - 1):
-                    left_ops = sides[i][0]
-                    right_ops = sides[i + 1][0]
-                    right_type = sides[i + 1][1]
-                    right_val = sides[i + 1][2]
-                    if right_val is not None and right_type in  ('LITINT', 'NUMVAR', 'LITNAT', 'LITFLOAT'):
-                        if len(left_ops) == 1:
-                            statements.append(Statement('assignment', [left_ops[0][1], right_val], line=line))
-                        else:
-                            statements.append(Statement('sum_assignment', [left_ops, right_val], line=line))
-                    elif right_val is not None:
-                        if len(left_ops) == 1:
-                            statements.append(Statement('equality', [left_ops[0][1], right_val], line=line))
-                        else:
-                            statements.append(Statement('sum_equality', [left_ops, right_ops], line=line))
-                    else:
-                        statements.append(Statement('sum_equality', [left_ops, right_ops], line=line))
-                for i, j in combinations(range(len(sides)), 2):
-                    if j == i + 1:
-                        continue
-                    left_ops = sides[i][0]
-                    right_ops = sides[j][0]
-                    right_type = sides[j][1]
-                    right_val = sides[j][2]
-                    statements.append(
-                        Statement('chain_conclusion', [left_ops, right_ops, right_type, right_val], line=line))
-            if self.current().type == 'INEQUALS':
-                self.advance()
-                if self.current().type not in ('ANGLE', 'NUMVAR'):
-                    print(f"{line_val}\nSyntax Error on line {line}: Expected angle or numvar after '!='")
-                    sys.exit(1)
-                right = self.current().value
-                self.advance()
-                statements.append(Statement('equality', [left_angle, right], line=line, goal=False))
-            if self.current().type == 'LESS':
-                self.advance()
-                right = self.current().value
-                self.advance()
-                # flip
-                statements.append(Statement('greater_than', [right, left_angle], line=line))
 
-            if self.current().type == 'GREATER':
-                self.advance()
-                right = self.current().value
-                self.advance()
-                statements.append(Statement('greater_than', [left_angle, right], line=line))
+        elif self.current().type == 'ANGLE':
+            expr = self.expr()
+            self.regress()
+            l = self.current().line
+            self.advance()
+            s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
+            statements.append(s)
 
         elif self.current().type.startswith('LIT'):
             l = self.current().line
