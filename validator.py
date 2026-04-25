@@ -850,7 +850,11 @@ class Validator:
                 if left_value.get(right[1]) is None:
                     self.errors.append(self._err(expr.line, f"Can't access field {right[1]} of object {left[1]} where it doesn't exist."))
                     return None
-                return self.variables.get(left_value[right[1]][1])
+                field = left_value.get(right[1])
+                if field is None:
+                    self.errors.append(self._err(expr.line, f"Can't access field '{right[1]}' of object '{left[1]}'."))
+                    return None
+                return (field[0], field[1])
             elif operator == 'INDEXACCESS':
                 if l_type != 'Tuple':
                     self.errors.append(self._err(expr.line, f"Can't access index of object of type {l_type}."))
@@ -858,7 +862,11 @@ class Validator:
                 if left_value[right[1]] is None:
                     self.errors.append(self._err(expr.line, f"Can't access index {right[1]} of object {left[1]} where it doesn't exist."))
                     return None
-                return self.variables.get(left_value[right[1]][1])
+                element = left_value[right[1] - 1]  # 1-indexed
+                if element is None:
+                    self.errors.append(self._err(expr.line, f"Can't access index {right[1]} of '{left[1]}'."))
+                    return None
+                return (element[0], element[1])
             else:
                 r_var = self.variables.get(right[1])
                 if r_var is None:
@@ -1099,7 +1107,9 @@ class Validator:
             return
 
         if stmt.type == 'expression':
+            print(stmt.objects[0])
             res = self.solve_expression(stmt.objects[0], make_true)
+            print(res)
             if res is not None:
                 if res[0] == 'Bool':
                     if make_true:
