@@ -59,6 +59,7 @@ nonwhitespace_keywords = {
 }
 
 operators = {
+    'mod': 'MODULO',
     '+': 'PLUS',
     '-': 'MINUS',
     '*': 'MULTIPLY',
@@ -325,11 +326,9 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
             #numbers
             elif line[pos].isdigit() or line[pos] == '-':
                 if line[pos] == '-':
-                    negative = True
                     num = '-'
                     pos += 1
                 else:
-                    negative = False
                     num = ''
                 decimal = False
                 while pos < len(line) and (line[pos].isdigit() or line[pos] == '.'):
@@ -344,11 +343,8 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
                 if decimal:
                     num_type = 'LITFLOAT'
                     num = float(num)
-                elif negative:
-                    num_type = 'LITINT'
-                    num = int(num)
                 else:
-                    num_type = 'LITNAT'
+                    num_type = 'LITINT'
                     num = int(num)
                 tokens.append(Token(num_type, num, line_num, line))
                 continue

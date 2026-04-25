@@ -22,6 +22,7 @@ class Validator:
         self.contradictory = False
         self.congruence_pools: Dict[int, Set[str]] = {}  # pool_id → set of ident names
         self._next_pool_id: int = 1
+        self.aliases = {}
 
         self.variables: Dict[str, [str, any]] = {}
 
@@ -38,18 +39,6 @@ class Validator:
         self.axioms = axioms
 
         for kind, item in ordered:
-            if kind == 'operation':
-                if item.left_type is None:
-                    t = (item.operator, item.right_type)
-                else:
-                    t = self.normalize_comparison(item.left_type, item.operator, item.right_type)
-                self.operations[t] = (item.return_type, item.cases, item.attributes)
-
-        if hypothesis:
-            for stmt in hypothesis.statements:
-                self.process_statement(stmt, is_hypothesis=True)
-
-        for kind, item in ordered:
             if kind == 'axiom':
                 pass
             elif kind == 'theorem':
@@ -64,6 +53,13 @@ class Validator:
                 self.operations[t] = (item.return_type, item.cases, item.attributes)
             elif kind == 'type':
                 self.types[item[0]] = item
+                for alias in item[1]:
+                    self.aliases[alias] = item[0]
+
+        if hypothesis:
+            for stmt in hypothesis.statements:
+                self.process_statement(stmt, is_hypothesis=True)
+
 
         for stmt in proofs:
             self.process_statement(stmt, is_hypothesis=False)
@@ -355,6 +351,7 @@ class Validator:
 
     def call_extern(self, extern_name: str, left_value, right_value, line, ret_type):
         """Call an external function by name"""
+
         if extern_name in externs:
             extern_func = externs[extern_name]
             if left_value == 'true': left_value = True
@@ -362,7 +359,12 @@ class Validator:
             if right_value == 'true': right_value = True
             elif right_value == 'false': right_value = False
 
-            res = extern_func(left_value, right_value)
+            if left_value is None:
+                res = extern_func(right_value)
+            elif right_value is None:
+                res = extern_func(left_value)
+            else:
+                res = extern_func(left_value, right_value)
             if res is True: res='true'
             if res is False: res='false'
             return ret_type, res
@@ -463,7 +465,7 @@ class Validator:
                         self.congruence_pools[l_pool].update(self.congruence_pools.pop(r_pool))
                         for ident in self.congruence_pools[l_pool]:
                             self.variables[ident][1]['_congruence'] = l_pool
-                return ('Bool', 'true')
+                return 'Bool', 'true'
 
         if type(left) == Expression:
             left = self.solve_expression(expression.left, make_true)
@@ -749,7 +751,9 @@ class Validator:
                             return
                     else:
                         value = self.solve_expression(value, make_true)
-                self.variables[stmt_object[1]] = [def_type, value]
+                if def_type is None:
+                    def_type = value[0]
+                self.variables[stmt_object[1]] = [def_type, value[1]]
 
             elif stmt_object[0] == 'IDENT':
                 value_to_assign = None
@@ -797,21 +801,30 @@ class Validator:
 
                 if value_to_assign is not None:
                     ident[1]['degrees'][1] = value_to_assign
-                    print(ident)
-
-                print(ident, self.variables)
 
             else:
                 pass
 
         elif stmt.type == 'typehint':
             variable = stmt.objects[0]
-            o_type = stmt.objects[1]
-            var = self.variables.get(variable)
-            if var is None:
-                self.variables[variable] = [o_type, None]
+            if stmt.objects[1] in self.types:
+                o_type = stmt.objects[1]
+                var = self.variables.get(variable)
+                if var is None:
+                    self.variables[variable] = [o_type, None]
+                else:
+                    var[0] = o_type
             else:
-                var[0] = o_type
+                if stmt.objects[1] in self.aliases:
+                    o_type = self.aliases[stmt.objects[1]]
+                    var = self.variables.get(variable)
+                    if var is None:
+                        self.variables[variable] = [o_type, None]
+                    else:
+                        var[0] = o_type
+                else:
+                    self.errors.append(self._err(stmt.line,
+                                                 f"Undefined type '{stmt.objects[1]}'"))
 
         elif stmt.type == 'print':
             print(stmt.objects[0])

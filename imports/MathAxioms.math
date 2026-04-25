@@ -7,12 +7,31 @@
 #    Then:
 #        AB equals EF - CD
 
-type Nat
 type Bool
 type Int
 type String
 type Tuple
 type Namedtuple
+
+
+operation Int <= Int -> Bool
+    gives first < second or first equals second
+
+operation Int >= Int -> Bool
+    gives first > second or first equals second
+
+operation isNatural Int -> Bool
+    gives first >= 0
+
+type Nat alias natural
+    accepts Int
+    matches isNatural
+
+@[extern neg]
+operation - Int -> Int
+
+@[extern mod]
+operation Int mod Int -> Int
 
 # nat and int
 @[extern add]
@@ -50,14 +69,6 @@ operation Int > Int -> Bool
 
 @[extern lt]
 operation Int < Int -> Bool
-
-
-operation Int <= Int -> Bool
-    gives first < second or first equals second
-
-operation Int >= Int -> Bool
-    gives first > second or first equals second
-
 
 operation Int != Int -> Bool
     gives not (first equals second)

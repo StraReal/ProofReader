@@ -8,6 +8,7 @@ OP_MAP = {  # Use https://docs.python.org/3/reference/expressions.html#operator-
             'FIELDACCESS':Operator("'s ",    infix=(10,True)),
             'EXPONENT':   Operator('^',      infix=(9, True)),
             'MULTIPLY':   Operator('*',      infix=(7, True)),
+            'MODULO':     Operator('mod',    infix=(7, True)),
             'DIVIDE':     Operator('/',      infix=(7, True)),
             'PLUS':       Operator('+',      infix=(6, True)),
             'MINUS':      Operator('-',      infix=(6, True) ,        prefix=8),
