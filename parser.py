@@ -3,8 +3,9 @@ from itertools import combinations
 
 attributes = {}
 OP_MAP = {  # Use https://docs.python.org/3/reference/expressions.html#operator-precedence for reference
-            # TOKEN TYPE |      SYMBOL     | INFIX PREC,LEFT-ASS |  PREFIX PREC   | POSTFIX PREC
-            'FIELDACCESS':Operator("'s ",    infix=(10, True)),
+            # TOKEN TYPE |      SYMBOL     | INFIX PREC,LEFT-ASS |  PREFIX PREC   | POSTFIX PREC | DISTFIX (closed) PREC
+            'LBRACKET':   Operator("[",                                                           distfix=("]", 10, True, "INDEXACCESS")),
+            'FIELDACCESS':Operator("'s ",    infix=(10,True)),
             'EXPONENT':   Operator('^',      infix=(9, True)),
             'MULTIPLY':   Operator('*',      infix=(7, True)),
             'DIVIDE':     Operator('/',      infix=(7, True)),
@@ -114,162 +115,94 @@ class Parser:
                 statements.extend(stmt)
         return HypothesisBlock(statements)
 
-    def parse_axiom(self) -> AxiomDefinition:
-        self.advance()  # skip 'axiom'
-
-        self.last_precolon = self.current().type
+    def parse_named_block(self, block_keyword):
         line = self.current().line_num
-        if self.current().type != 'VARIABLE':
-            print_error(line, f"Syntax Error: Expected axiom name", self.import_map)
+        if self.current().type != block_keyword:
+            print_error(line, f"Syntax Error: Expected '{block_keyword}'", self.import_map)
             sys.exit(1)
-        name = self.current().value
-
         self.advance()
         if self.current().type != 'COLON':
-            print_error(line, f"Syntax Error: Expected colon after '{self.last_precolon}'", self.import_map)
-        self.advance()
-        if self.current().type == 'NEWLINE':
-            self.advance()
-        if self.current().type != 'INDENT':
-            print_error(line, f"Syntax Error: Expected indented block after '{self.last_precolon}'", self.import_map)
-            sys.exit(1)
-        self.advance()
-
-        if self.current().type != 'GIVEN':
-            print_error(line, "Syntax Error: Expected 'Given' in axiom", self.import_map)
-            sys.exit(1)
-
-        self.last_precolon = self.current().type
-        self.advance()
-        if self.current().type != 'COLON':
-            print_error(line, f"Syntax Error: Expected colon after '{self.last_precolon}'", self.import_map)
+            print_error(line, f"Syntax Error: Expected colon after '{block_keyword}'", self.import_map)
             sys.exit(1)
         self.advance()
         if self.current().type == 'NEWLINE':
             self.advance()
         if self.current().type != 'INDENT':
-            print_error(line, f"Syntax Error: Expected indented block after '{self.last_precolon}'", self.import_map)
+            print_error(line, f"Syntax Error: Expected indented block after '{block_keyword}'", self.import_map)
             sys.exit(1)
         self.advance()
-
-        given = self.parse_hypothesis_block()
-        self.advance()
-
-        if self.current().type != 'THEN':
-            print_error(line, "Syntax Error: Expected 'Then' in axiom", self.import_map)
-            sys.exit(1)
-
-        self.last_precolon = self.current().type
-        self.advance()
-        if self.current().type != 'COLON':
-            print_error(line, f"Syntax Error: Expected colon after '{self.last_precolon}'", self.import_map)
-        self.advance()
-        if self.current().type == 'NEWLINE':
-            self.advance()
-        if self.current().type != 'INDENT':
-            print_error(line, f"Syntax Error: Expected indented block after '{self.last_precolon}'", self.import_map)
-            sys.exit(1)
-        self.advance()
-
-        then_statements = []
+        statements = []
         while self.current().type != 'DEDENT':
-            stmts = self.parse_statement()
-            if stmts:
-                then_statements.extend(stmts)
+            statements.extend(self.parse_statement())
+        self.advance()
+        return statements
 
+    def extract_lets(self, statements):
         let_objects = []
         let_numvars = []
-        for stmt in given.statements:
+        for stmt in statements:
             if stmt.type == 'let':
                 let_objects.append(stmt.objects[0])
             elif stmt.type == 'let_numvar':
                 let_numvars.append(stmt.objects[0])
+        return let_objects, let_numvars
 
-        return AxiomDefinition(name, given, then_statements, let_objects, let_numvars)
+    def parse_axiom(self) -> AxiomDefinition:
+        self.advance()  # skip 'axiom'
+        line = self.current().line_num
+
+        if self.current().type != 'VARIABLE':
+            print_error(line, "Syntax Error: Expected axiom name", self.import_map)
+            sys.exit(1)
+        name = self.current().value
+        self.advance()
+
+        if self.current().type != 'COLON':
+            print_error(line, f"Syntax Error: Expected colon after axiom name", self.import_map)
+            sys.exit(1)
+        self.advance()
+        if self.current().type == 'NEWLINE':
+            self.advance()
+        if self.current().type != 'INDENT':
+            print_error(line, "Syntax Error: Expected indented block after axiom name", self.import_map)
+            sys.exit(1)
+        self.advance()
+
+        given_statements = self.parse_named_block('GIVEN')
+        then_statements = self.parse_named_block('THEN')
+
+        let_objects, let_numvars = self.extract_lets(given_statements)
+
+        return AxiomDefinition(name, given_statements, then_statements, let_objects, let_numvars)
 
     def parse_theorem(self) -> TheoremDefinition:
-        self.advance()
+        self.advance()  # skip 'theorem'
         line = self.current().line_num
 
         if self.current().type != 'VARIABLE':
             print_error(line, "Syntax Error: Expected theorem name", self.import_map)
             sys.exit(1)
         name = self.current().value
-
-        self.last_precolon = self.current().type
         self.advance()
+
         if self.current().type != 'COLON':
-            print_error(line, f"Syntax Error: Expected colon after '{self.last_precolon}'", self.import_map)
+            print_error(line, f"Syntax Error: Expected colon after theorem name", self.import_map)
+            sys.exit(1)
         self.advance()
         if self.current().type == 'NEWLINE':
             self.advance()
         if self.current().type != 'INDENT':
-            print_error(line, f"Syntax Error: Expected indented block after '{self.last_precolon}'", self.import_map)
+            print_error(line, "Syntax Error: Expected indented block after theorem name", self.import_map)
             sys.exit(1)
         self.advance()
 
-        if self.current().type != 'GIVEN':
-            print_error(line, "Syntax Error: Expected 'Given' in theorem", self.import_map)
-            sys.exit(1)
+        given_statements = self.parse_named_block('GIVEN')
+        then_statements = self.parse_named_block('THEN')
+        proof_statements = self.parse_named_block('PROOF')
 
-        self.last_precolon = self.current().type
-        self.advance()
-        if self.current().type != 'COLON':
-            print_error(line, f"Syntax Error: Expected colon after '{self.last_precolon}'", self.import_map)
-        self.advance()
-        if self.current().type == 'NEWLINE':
-            self.advance()
-        if self.current().type != 'INDENT':
-            print_error(line, f"Syntax Error: Expected indented block after '{self.last_precolon}'", self.import_map)
-            sys.exit(1)
-        self.advance()
+        let_objects, let_numvars = self.extract_lets(given_statements)
 
-        given = self.parse_hypothesis_block()
-        self.advance()
-        if self.current().type != 'THEN':
-            print_error(line, "Syntax Error: Expected 'Then' in theorem", self.import_map)
-            sys.exit(1)
-        self.last_precolon = self.current().type
-        self.advance()
-        if self.current().type != 'COLON':
-            print_error(line, f"Syntax Error: Expected colon after '{self.last_precolon}'", self.import_map)
-        self.advance()
-        if self.current().type == 'NEWLINE':
-            self.advance()
-        if self.current().type != 'INDENT':
-            print_error(line, f"Syntax Error: Expected indented block after '{self.last_precolon}'", self.import_map)
-            sys.exit(1)
-        self.advance()
-
-        then_statements = []
-        while self.current().type != 'DEDENT':
-            stmts = self.parse_statement()
-            if stmts:
-                then_statements.extend(stmts)
-        self.advance()
-
-        if self.current().type != 'PROOF':
-            print_error(line, f"Syntax Error: Expected 'Proof' block in theorem '{name}'", self.import_map)
-            sys.exit(1)
-        self.advance()
-        if self.current().type == 'COLON':
-            self.advance()
-
-        proof_statements = []
-        while self.current().type != 'DEDENT':
-            stmts = self.parse_statement()
-            if stmts:
-                proof_statements.extend(stmts)
-        self.advance()
-        let_objects = []
-        let_numvars = []
-        for stmt in given.statements:
-            if stmt.type == 'let':
-                let_objects.append(stmt.objects[0])
-            elif stmt.type == 'let_numvar':
-                let_numvars.append(stmt.objects[0])
-
-        return TheoremDefinition(name, given, then_statements, proof_statements, let_objects, let_numvars)
+        return TheoremDefinition(name, given_statements, then_statements, proof_statements, let_objects, let_numvars)
 
     def parse_sum_operands(self, first_operand: str, allowed_types: Sequence[str]) -> List[tuple]:
         """Returns list of (sign, name) pairs. First operand always gets '+'."""
@@ -404,11 +337,25 @@ class Parser:
         while self.current().type in OP_MAP:
             op = self.current().type
             op_info = OP_MAP[op]
+
+            if op_info.distfix is not None:
+                closing, prec, left_assoc, new_op_name = op_info.distfix
+                if prec <= prev_prec:
+                    break
+                self.advance()
+                inner = self.expr(-1)
+                if self.current().value != closing:
+                    print_error(self.current().line_num, f"Expected '{closing}'", self.import_map)
+                    sys.exit(1)
+                self.advance()
+                left = Expression(new_op_name, left, inner, line=self.current().line_num)
+                continue
+
             if op_info.infix is None or op_info.infix[0] <= prev_prec:
                 break
             prec, left_assoc = op_info.infix
             self.advance()
-            left = Expression(op, left, self.expr(prec if left_assoc else prec - 1))
+            left = Expression(op, left, self.expr(prec if left_assoc else prec - 1), line=self.current().line_num)
         return left
 
     def atom(self):
@@ -420,9 +367,11 @@ class Parser:
             self.advance()
             return val_type, value
 
-
-
         elif val_type == 'VARIABLE':
+            self.advance()
+            return 'VARIABLE', value
+
+        elif val_type == 'IDENT':
             self.advance()
             return 'VARIABLE', value
 
@@ -430,19 +379,21 @@ class Parser:
             self.advance()
             return Expression(val_type, self.expr(OP_MAP[val_type].prefix), 'none_for_unary', line=self.current().line_num)
 
-
         elif val_type == 'LPAR':
             self.advance()
             first = self.expr(-1)
             if self.current().type == 'COMMA':
                 elements = [first]
                 while self.current().type == 'COMMA':
-                    self.advance()  # consume ','
+                    self.advance()
                     elements.append(self.expr(-1))
                 if self.current().type != 'RPAR':
                     print_error(tok.line_num, "Expected closing ')'", self.import_map)
                     sys.exit(1)
                 self.advance()
+
+                if all(isinstance(e, Expression) and e.operator == 'ASSIGN' for e in elements):
+                    return 'NAMEDTUPLE', elements
                 return 'TUPLE', elements
             else:
                 if self.current().type != 'RPAR':
@@ -450,7 +401,6 @@ class Parser:
                     sys.exit(1)
                 self.advance()
                 return first
-
         else:
             print_error(tok.line_num, f"Expected operand, got {val_type}", self.import_map)
             sys.exit(1)
@@ -479,16 +429,14 @@ class Parser:
                 statements.extend(conclusion)
             return statements
 
-
-
         elif self.current().type == 'LET':
             self.advance()
             name_type = self.current().type
             name = self.current().value
             self.advance()
-            type_annotation = None
             value = None
             if name_type == 'VARIABLE':
+                type_annotation = None
                 if self.current().type in ('COLON', 'BE'):
                     self.advance()
                     type_annotation = self.current().value
@@ -497,11 +445,13 @@ class Parser:
                     self.advance()
                     value = self.expr()
                 statements.append(Statement('let', [(name_type, name)], value=value, line=line))
+                if type_annotation is not None:
+                    statements.append(Statement('typehint', [name, type_annotation], line=line))
             elif name_type == 'IDENT':
+                if self.current().type == 'ASSIGN':
+                    self.advance()
+                    value = self.expr()
                 statements.append(Statement('let', [(name_type, name)], value=value, line=line))
-                statements.extend(self.parse_statement())
-            if type_annotation is not None:
-                statements.append(Statement('typehint', [name, type_annotation], line=line))
 
         elif self.current().type == 'NUMVAR':
             left = self.current().value
@@ -543,7 +493,6 @@ class Parser:
                 statements.append(Statement('equality', [left, right], line=line, goal=False))
 
         elif self.current().type == 'VARIABLE':
-            left_obj = self.current().value
             self.regress()
             if self.current().type in ('COLON','BE'): #this is a type
                 self.advance() # var (self)
@@ -569,75 +518,12 @@ class Parser:
             statements.append(s)
 
         elif self.current().type == 'IDENT':
-            left = self.current().value
-            left_type = self.current().type
+            expr = self.expr()
+            self.regress()
+            l = self.current().line
             self.advance()
-            left_operands = self.parse_sum_operands(left, (left_type,))
-            if self.current().type in ('ASSIGN', 'EQUALS'):
-                sides = [(left_operands, None, None)]
-                while self.current().type in ('ASSIGN', 'EQUALS'):
-                    self.advance()
-                    rhs = self.parse_rhs(left_type, line)
-                    if rhs[0] == 'single':
-                        _, right, right_type = rhs
-                        sides.append(([('+', right)], right_type, right))
-                    else:
-                        _, right_operands = rhs
-                        sides.append((right_operands, None, None))
-                for i in range(len(sides) - 1):
-                    left_ops = sides[i][0]
-                    right_ops = sides[i + 1][0]
-                    right_type = sides[i + 1][1]
-                    right_val = sides[i + 1][2]
-                    if right_val is not None and right_type in ('LITINT', 'NUMVAR', 'LITNAT', 'LITFLOAT'):
-                        if len(left_ops) == 1:
-                            statements.append(Statement('assignment', [left_ops[0][1], right_val], line=line))
-                        else:
-                            statements.append(Statement('sum_assignment', [left_ops, right_val], line=line))
-                    elif right_val is not None:
-                        if len(left_ops) == 1:
-                            statements.append(Statement('equality', [left_ops[0][1], right_val], line=line))
-                        else:
-                            statements.append(Statement('sum_equality', [left_ops, right_ops], line=line))
-                    else:
-                        statements.append(Statement('sum_equality', [left_ops, right_ops], line=line))
-
-            elif self.current().type == 'INEQUALS':
-                self.advance()
-                if self.current().type not in ('IDENT', 'NUMVAR'):
-                    print(f"{line_val}\nSyntax Error on line {line}: Expected identifier or numvar after '!='")
-                    sys.exit(1)
-                right = self.current().value
-                self.advance()
-                statements.append(Statement('equality', [left, right], line=line, goal=False))
-
-            elif self.current().type == 'IN':
-                if len(left) != 1:
-                    print_error(line, f"Syntax Error: only a point can be contained, given: {left}",
-                                self.import_map)
-                    sys.exit(1)
-                self.advance()
-                segment = self.current().value
-                if len(segment) < 2:
-                    print_error(line, f"Syntax Error: points can only be contained in edges or planes, given: {segment}",
-                                self.import_map)
-                    sys.exit(1)
-                self.advance()
-                statements.append(Statement('contains', [segment, left], line=line))
-
-            elif self.current().type == 'CONTAINS':
-                if len(left) < 2:
-                    print_error(line, f"Syntax Error: points can only be contained in edges or planes, given: {left}",
-                                self.import_map)
-                    sys.exit(1)
-                self.advance()
-                point = self.current().value
-                if len(point) != 1:
-                    print_error(line, f"Syntax Error: only a point can be contained, given: {point}",
-                                self.import_map)
-                    sys.exit(1)
-                self.advance()
-                statements.append(Statement('contains', [left, point], line=line))
+            s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
+            statements.append(s)
 
         elif self.current().type == 'ANGLE':
             left_angle = self.current().value

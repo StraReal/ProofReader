@@ -3,6 +3,12 @@ import MathAxioms
 
 Hypothesis:
     let a be Nat = 3
+    let AB = 3
+    let number = 3
+    let randomtuple : Namedtuple = (r = a, g = 200, b = 250)
+    let anontuple : Tuple = (120, 121, 330)
+
 
 Proof:
-    a != 4 - 129^0 is false
+    randomtuple's r equals number
+    anontuple[0] equals 120

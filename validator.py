@@ -75,7 +75,7 @@ class Validator:
         child = Validator(self.import_map)
         child.axioms = self.axioms
 
-        for stmt in theorem.given.statements:
+        for stmt in theorem.given:
             child.process_statement(stmt, is_hypothesis=True)
         child.propagate_transitivity()
 
@@ -432,23 +432,6 @@ class Validator:
             return name
         return re.sub(pattern, lambda m: bindings[m.group(0)], name)
 
-    def _check_defined(self, canon, line, proof=False):
-        """Return True if every named point in canon is in defined_objects, else append error."""
-        for _, name in canon:
-            try:
-                float(name)
-                continue
-            except ValueError:
-                pass
-            if not re.match(r'^[xyz]_\d+$', name):
-                norm = self.normalize_object(name)
-                points = norm[3:] if norm.startswith('ang') else norm
-                for p in points:
-                    if p not in self.defined_objects:
-                        self.errors.append(self._err(line, f"Object '{norm}' not defined"))
-                        return False
-        return True
-
     def _substitute_numeric_values(self, canon):
         result = []
         for sign, name in canon:
@@ -762,7 +745,7 @@ class Validator:
             ex_type = expression[0]
             if ex_type.upper().startswith('LIT'):
                 ex_type = ex_type[3:].capitalize()
-            return (ex_type, val)
+            return ex_type, val
         if isinstance(expression, Statement):
             if expression.type == 'gives':
                 expr_to_evaluate = expression.objects[0]
@@ -826,12 +809,30 @@ class Validator:
                 return result
 
         if left[0] == 'VARIABLE':
-            l_var = self.variables.get(left[1])
-            if l_var is None:
-                self.errors.append(self._err(expr.line, f"Undefined variable '{left[1]}'."))
-                return None
-            l_type = l_var[0]
-            left_value = l_var[1]
+            if left[1].isupper() and operator != 'FIELDACCESS':
+                l_var = self.variables.get(left[1])
+                if l_var is None:
+                    self.errors.append(self._err(expr.line, f"Undefined ident '{left[1]}'."))
+                    return None
+                l_type = l_var[0]
+                left_value = l_var[1]
+                match len(left[1]):
+                    case 1:
+                        l_type = 'Int'
+                        left_value = left_value['_congruence'][1]
+                    case 2:
+                        l_type = 'Int'
+                        left_value = left_value['length'][1]
+                    case n if n > 2:
+                        l_type = 'Int'
+                        left_value = left_value['_congruence'][1]
+            else:
+                l_var = self.variables.get(left[1])
+                if l_var is None:
+                    self.errors.append(self._err(expr.line, f"Undefined variable '{left[1]}'."))
+                    return None
+                l_type = l_var[0]
+                left_value = l_var[1]
         else:
             if operator == 'ASSIGN':
                 self.errors.append(self._err(expr.line, f"Can't assign to literal {left[1]}."))
@@ -842,12 +843,30 @@ class Validator:
             left_value = left[1]
 
         if right[0] == 'VARIABLE':
-            r_var = self.variables.get(right[1])
-            if r_var is None:
-                self.errors.append(self._err(expr.line, f"Undefined variable '{right[1]}'."))
-                return None
-            r_type = r_var[0]
-            right_value = r_var[1]
+            if operator == 'FIELDACCESS':
+                if l_type != 'Namedtuple':
+                    self.errors.append(self._err(expr.line, f"Can't access field of object of type {l_type}."))
+                    return None
+                if left_value.get(right[1]) is None:
+                    self.errors.append(self._err(expr.line, f"Can't access field {right[1]} of object {left[1]} where it doesn't exist."))
+                    return None
+                return self.variables.get(left_value[right[1]][1])
+            elif operator == 'INDEXACCESS':
+                if l_type != 'Tuple':
+                    self.errors.append(self._err(expr.line, f"Can't access index of object of type {l_type}."))
+                    return None
+                if left_value[right[1]] is None:
+                    self.errors.append(self._err(expr.line, f"Can't access index {right[1]} of object {left[1]} where it doesn't exist."))
+                    return None
+                return self.variables.get(left_value[right[1]][1])
+            else:
+                r_var = self.variables.get(right[1])
+                if r_var is None:
+                    self.errors.append(self._err(expr.line, f"Undefined variable '{right[1]}'."))
+                    return None
+                r_type = r_var[0]
+                right_value = r_var[1]
+
         else:
             r_type = right[0].capitalize()
             if right[0].upper().startswith('LIT'):
@@ -870,8 +889,8 @@ class Validator:
             if make_true:
                 self.variables[left[1]][1] = right_value
             return 'Bool', 'true'
-
         elif operator == 'EQUALS':
+            print(l_type, r_type, left_value, right_value)
             t = self.normalize_comparison(l_type, operator, r_type)
             op_def = self.operations.get(t)
             if op_def is None:
@@ -904,6 +923,10 @@ class Validator:
                         self.errors.append(self._err(expr.line, f"Operation {operator} produced no result"))
                         return None
                     return result
+        elif operator == 'FIELDACCESS':
+            return left_value[right_value][1]
+        elif operator == 'INDEXACCESS':
+            return left_value[right_value]
         else:
             t = self.normalize_comparison(l_type, operator, r_type)
             op_def = self.operations.get(t)
@@ -914,8 +937,6 @@ class Validator:
             else:
                 if op_def[2]:
                     extern_name = op_def[2]['extern'][0]
-                    print(expr)
-                    print(self.call_extern(extern_name, left_value, right_value, expr.line, op_def[0]))
                     return self.call_extern(extern_name, left_value, right_value, expr.line, op_def[0])
                 else:
                     result = self._call_op(op_def, {'first': [l_type, left_value], 'second': [r_type, right_value]})
@@ -938,39 +959,52 @@ class Validator:
             value = stmt.value
 
             if stmt_object[0] == 'VARIABLE':
+                def_type = None
+                if value is not None:
+                    if type(value) is tuple:
+                        if value[0].startswith('LIT'):
+                            def_type = value[0][3:].capitalize()
+                            value = value[1]
+                        else:
+                            if value[0] == 'NAMEDTUPLE':
+                                fields = {}
+                                for field_expr in value[1]:
+                                    field_name = field_expr.left[1]
+                                    field_value = self.solve_expression(field_expr.right, make_true)
+                                    fields[field_name] = [field_value[0] if field_value else None,
+                                                          field_value[1] if field_value else None]
+                                self.variables[stmt_object[1]] = ['Namedtuple', fields]
+                                return
+                            elif value[0] == 'TUPLE':
+                                fields = []
+                                print(value)
+                                for field in value[1]:
+                                    field_value = self.solve_expression(field, make_true)
+                                    fields.append([field_value[0] if field_value else None,
+                                                          field_value[1] if field_value else None])
+                                self.variables[stmt_object[1]] = ['Tuple', fields]
+                                return
+                    else:
+                        value = self.solve_expression(value, make_true)
+                self.variables[stmt_object[1]] = [def_type, value]
+            elif stmt_object[0] == 'IDENT':
                 if value is not None:
                     if type(value) is tuple:
                         if value[0].startswith('LIT'):
                             value = value[1]
                         else:
-                            if value[0] == 'TUPLE':
-                                vals = []
-                                for item in value[1]:
-                                    if item[0] == 'VARIABLE':
-                                        vals.append(self.variables[item[1]][1])
-                                    else:
-                                        vals.append(item[1])
-                                value = tuple(vals)
-                            else:
-                                value = self.variables[value[1]][1]
+                            value = self.variables[value[1]][1]
                     else:
                         value = self.solve_expression(value, make_true)
-                self.variables[stmt_object[1]] = [None, value]
-
+                match len(stmt_object[1]):
+                    case 1:
+                        self.variables[stmt_object[1]] = ['Namedtuple', {'_congruent': ['Int', value], 'radius': ['Int', None]}]
+                    case 2:
+                        self.variables[stmt_object[1]] = ['Namedtuple', {'length': ['Int', value]}]
+                    case n if n > 2:
+                        self.variables[stmt_object[1]] = ['Namedtuple', {'_congruent': ['Int', value], 'area': ['Int', None], 'perimeter': ['Int', None]}]
             else:
-                points = list(stmt_object)
-                all_defined = all(p in self.defined_objects for p in points)
-                none_in_proof = not any(p in self.proof_defined_objects for p in points)
-                if not is_hypothesis and all_defined and none_in_proof:
-                    self.errors.append(
-                        self._err(stmt.line, f"'{stmt.objects[0]}' is already fully defined in the hypothesis"))
-                    self.last_let_failed = True
-                    return
-                for p in points:
-                    self.defined_objects.add(p)
-                    if not is_hypothesis:
-                        self.proof_defined_objects.add(p)
-                return
+                pass
 
         if stmt.type == 'typehint':
             variable = stmt.objects[0]
@@ -1035,7 +1069,7 @@ class Validator:
                 elif bool(result) == stmt.goal : self.errors.append(self._err(stmt.line, f"'{left} = {right}' is {'false' if stmt.goal else 'true'}, expected {expected_str}"))
             return
 
-        if stmt.type == 'assignment':
+        #if stmt.type == 'assignment':
             left = self.normalize_object(stmt.objects[0])
             right = stmt.objects[1]
             result = self.get_equality_value(left, float(right))
@@ -1126,7 +1160,7 @@ class Validator:
 
     def _check_bindings(self, axiom, bindings):
         """Check if bindings satisfy all given conditions. Returns True if all pass."""
-        for hyp in axiom.given.statements:
+        for hyp in axiom.given:
             if hyp.type == 'let':
                 obj = hyp.objects[0]
                 if obj in bindings:

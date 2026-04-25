@@ -12,6 +12,7 @@ type Bool
 type Int
 type String
 type Tuple
+type Namedtuple
 
 # nat and int
 @[extern add]

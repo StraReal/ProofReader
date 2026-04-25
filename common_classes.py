@@ -18,7 +18,7 @@ class Operator:
     prefix: int | None = None
     postfix: int | None = None
     infix: tuple[int, bool] | None = None
-    distfix: tuple[str, int, bool] | None = None
+    distfix: tuple[str, int, bool, str] | None = None
 
 @dataclass
 class Statement:
@@ -51,7 +51,7 @@ class HypothesisBlock:
 @dataclass
 class AxiomDefinition:
     name: str
-    given: HypothesisBlock
+    given: List[Statement]
     then: List[Statement]
     let_objects: List[str]
     let_numvars: List[str]
@@ -59,7 +59,7 @@ class AxiomDefinition:
 @dataclass
 class TheoremDefinition:
     name: str
-    given: HypothesisBlock
+    given: List[Statement]
     then: List[Statement]
     proof: List[Statement]
     let_objects: List[str]

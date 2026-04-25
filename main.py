@@ -283,7 +283,7 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
             if op_matched:
                 continue
 
-            elif match := re.match(r'[a-z][a-zA-Z0-9_]* ', line[pos:]):
+            elif match := re.match(r'[a-z_][a-zA-Z0-9_]* ', line[pos:]):
                 word = match.group(0).strip()
                 if re.match(r'^[a-z]_\d+$', word):
                     tokens.append(Token('NUMVAR', word, line_num, line))
@@ -413,7 +413,7 @@ validator.validate(axioms, hypothesis, ordered, proofs)
 
 print("=== Axioms ===")
 for name, axiom in axioms.items():
-    print(f"  {name}: {len(axiom.given.statements)} hypothesis statements")
+    print(f"  {name}: {len(axiom.given)} hypothesis statements")
 
 print("=== Parsed ===")
 if hypothesis:
