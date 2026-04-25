@@ -890,7 +890,6 @@ class Validator:
                 self.variables[left[1]][1] = right_value
             return 'Bool', 'true'
         elif operator == 'EQUALS':
-            print(l_type, r_type, left_value, right_value)
             t = self.normalize_comparison(l_type, operator, r_type)
             op_def = self.operations.get(t)
             if op_def is None:
@@ -977,7 +976,6 @@ class Validator:
                                 return
                             elif value[0] == 'TUPLE':
                                 fields = []
-                                print(value)
                                 for field in value[1]:
                                     field_value = self.solve_expression(field, make_true)
                                     fields.append([field_value[0] if field_value else None,
@@ -1101,7 +1099,6 @@ class Validator:
             return
 
         if stmt.type == 'expression':
-            print(stmt.objects[0])
             res = self.solve_expression(stmt.objects[0], make_true)
             if res is not None:
                 if res[0] == 'Bool':
