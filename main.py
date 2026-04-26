@@ -31,7 +31,15 @@ simple_keywords = { #require space or end
     'accepts': 'ACCEPTS',
     'gives': 'GIVES',
     'is congruent to': 'EQUALS',
-    'be': 'BE'
+    'be': 'BE',
+    'equals': 'EQUALS',
+    'is': 'EQUALS',
+    'and': 'AND',
+    'or': 'OR',
+    'not': 'NOT',
+    'nor': 'NOR',
+    'xor': 'XOR',
+    'nand': 'NAND',
     #'validate_assignment': 'VALIDATE_ASSIGNMENT',
 }
 
@@ -71,14 +79,6 @@ operators = {
     '>=': 'GETHAN',
     '<=': 'LETHAN',
     '!=': 'INEQUALS',
-    'equals': 'EQUALS',
-    'is': 'EQUALS',
-    'and': 'AND',
-    'or': 'OR',
-    'not': 'NOT',
-    'nor': 'NOR',
-    'xor': 'XOR',
-    'nand': 'NAND',
     "'s ": 'FIELDACCESS',
 }
 
@@ -204,7 +204,7 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
                         pos += len(keyword)
                         matched = True
                         break
-                    if not line[end_pos].isspace():
+                    if not (line[end_pos].isspace() or line[end_pos] == ')'):
                         continue
                     if token_type[2]:
                         tokens.append(Token(token_type[0], token_type[1](keyword), line_num, line))
@@ -289,7 +289,7 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
                 if re.match(r'^[a-z]_\d+$', word):
                     tokens.append(Token('NUMVAR', word, line_num, line))
                 else:
-                    if word.islower():
+                    if not word.isupper():
                         tokens.append(Token('VARIABLE', word, line_num, line))
                 pos += len(word)
                 continue
@@ -380,6 +380,7 @@ while True:
     import_map = {i + 1: file_tracker[i] for i in range(len(file_tracker))}
     check_balanced(code, import_map)
     tokens = tokenize(code, import_map)
+    print(tokens)
     parser = Parser(tokens, import_map)
     axioms, theorems, hypothesis, proofs, to_import, ordered = parser.parse()
 
@@ -419,6 +420,6 @@ print(f"Proofs: {len(proofs)} statements")
 print("\n=== Validation ===")
 if validator.errors:
     for error in validator.errors:
-        print(f"Error: {error}")
+        cprint(f"Error: {error}", 'r')
 else:
     print("All returned valid")

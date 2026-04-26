@@ -1,11 +1,11 @@
-#axiom SideSwitching:
-#    Given:
-#        let AB
-#        let CD
-#        let EF
-#        AB + CD equals EF
-#    Then:
-#        AB equals EF - CD
+axiom SideSwitching:
+    Given:
+        let AB
+        let CD
+        let EF
+        AB + CD equals EF
+    Then:
+        AB equals EF - CD
 
 type Bool
 type Int
@@ -23,9 +23,10 @@ operation Int >= Int -> Bool
 operation isNatural Int -> Bool
     gives first >= 0
 
-type Nat alias natural
+type Nat
+    alias natural
     accepts Int
-    matches isNatural
+    matches isNatural self
 
 @[extern neg]
 operation - Int -> Int

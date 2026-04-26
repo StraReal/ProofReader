@@ -2,8 +2,8 @@
 import MathAxioms
 
 Hypothesis:
-    let a = -2
-    let ex be Namedtuple = (b = 2,c = 5)
+    let a be natural = -2
+    let ex be Namedtuple = (a = 3,c = 5)
 
 Proof:
-    4 mod 3 equals 0 is false
+    isNatural 3 is true

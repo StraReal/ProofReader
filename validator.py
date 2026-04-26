@@ -634,7 +634,7 @@ class Validator:
                 return None
 
         if operator == 'ASSIGN':
-            if self.operations.get((l_type, operator, r_type)) is None and l_type != r_type:
+            if self.types[l_type] is None and l_type != r_type:
                 self.errors.append(self._err(expr.line, f"Cannot assign {r_type} to {l_type}"))
                 return None
             if make_true:

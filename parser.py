@@ -82,8 +82,12 @@ class Parser:
             elif self.current().type == 'OPERATION':
                 op = self.parse_operation_definition()
                 if op.left_type is None:
+                    if op.operator not in OP_MAP:
+                        OP_MAP[op.operator] = Operator(op.operator, prefix=11)
                     self.operations[(op.operator, op.right_type)] = (op.return_type, op.cases, op.attributes)
                 else:
+                    if op.operator not in OP_MAP:
+                        OP_MAP[op.operator] = Operator(op.operator, infix=(11, True))
                     self.operations[(op.left_type, op.operator, op.right_type)] = (op.return_type, op.cases,
                                                                                    op.attributes)
                 ordered.append(('operation', op))
@@ -108,7 +112,6 @@ class Parser:
         return self.axioms, self.theorems, hypothesis, proofs, [], ordered
 
     def parse_hypothesis_block(self) -> HypothesisBlock:
-
         statements = []
         while self.current().type != 'DEDENT':
             stmt = self.parse_statement()
@@ -219,94 +222,6 @@ class Parser:
             self.advance()
         return operands
 
-    def parse_operation_definition(self):
-        self.advance()  # skip 'operation'
-
-        first = self.current()
-        self.advance()
-
-        second = self.current()
-
-        if second.type in OP_MAP:
-            left_type = first.value
-            operator = second.type
-            self.advance()
-            right_type = self.current().value
-            self.advance()
-
-            return_type = None
-            if self.current().type == 'ARROW_TYPE':
-                self.advance()
-                return_type = self.current().value
-                self.advance()
-        else:
-            operator = first.type
-            right_type = second.value
-            left_type = None
-            self.advance()
-            self.advance()
-            return_type = self.current().value
-            self.advance()
-
-        cases = []
-        self.advance()
-        if self.current().type == 'INDENT':
-            self.advance()
-            while self.current().type != 'DEDENT':
-                case = self.parse_statement()
-                cases.extend(case)
-            self.advance()  # skip DEDENT
-
-        attributes = self.pending_attributes
-        self.pending_attributes = {}
-
-        return OperationDefinition(
-            left_type=left_type,
-            operator=operator,
-            right_type=right_type,
-            return_type=return_type,
-            cases=cases,
-            attributes=attributes,
-        )
-
-    def parse_type(self):
-        self.advance()  # skip 'type'
-
-        name = self.current().value
-        self.advance()
-
-        aliases = []
-
-        # Optional single alias on the same line
-        if self.current().value == 'alias':
-            self.advance()
-            aliases.append(self.current().value)
-            self.advance()
-
-        accepts = []
-        matches = []
-
-        if self.current().type == 'INDENT':
-            self.advance()
-            while self.current().type != 'DEDENT':
-                if self.current().type == 'ALIAS':
-                    self.advance()
-                    aliases.append(self.current().value)
-                    self.advance()
-                elif self.current().type == 'ACCEPTS':
-                    self.advance()
-                    accepts.append(self.current().value)
-                    self.advance()
-                elif self.current().type == 'MATCHES':
-                    self.advance()
-                    matches.append(self.current().value)
-                    self.advance()
-                else:
-                    self.advance()
-            self.advance()  # skip DEDENT
-
-        return name, aliases, accepts, matches
-
     def parse_axiom_bindings(self) -> list:
         raw_args = []
         while self.current().type != 'RBRACE':
@@ -333,10 +248,89 @@ class Parser:
                 sides.append(right_operands)
         return sides
 
+    def parse_operation_definition(self):
+        self.advance()  # skip 'operation'
+
+        first = self.current()
+        self.advance()
+
+        second = self.current()
+        self.advance()
+
+        if first.value in self.types:
+            left_type = first.value
+            operator = second.type if second.type in OP_MAP else second.value
+            right_type = self.current().value
+            self.advance()
+        else:
+            left_type = None
+            operator = first.type if first.type in OP_MAP else first.value
+            right_type = second.value
+
+        return_type = None
+        if self.current().type == 'ARROW_TYPE':
+            self.advance()
+            return_type = self.current().value
+            self.advance()
+
+        cases = []
+        self.advance()  # skip colon or newline
+        if self.current().type == 'INDENT':
+            self.advance()
+            while self.current().type != 'DEDENT':
+                case = self.parse_statement()
+                cases.extend(case)
+            self.advance()  # skip DEDENT
+
+        attributes = self.pending_attributes
+        self.pending_attributes = {}
+
+        return OperationDefinition(
+            left_type=left_type,
+            operator=operator,
+            right_type=right_type,
+            return_type=return_type,
+            cases=cases,
+            attributes=attributes,
+        )
+
+    def parse_type(self):
+        self.advance()  # skip 'type'
+
+        name = self.current().value
+        self.advance()
+        self.advance()
+
+        aliases = []
+        accepts = []
+        matches = []
+
+        if self.current().type == 'INDENT':
+            self.advance()
+            print(self.current().type, name)
+            while self.current().type != 'DEDENT':
+                if self.current().type == 'ALIAS':
+                    self.advance()
+                    aliases.append(self.current().value)
+                    self.advance()
+                elif self.current().type == 'ACCEPTS':
+                    self.advance()
+                    accepts.append(self.current().value)
+                    self.advance()
+                elif self.current().type == 'MATCHES':
+                    self.advance()
+                    matches.append(self.expr())
+                else:
+                    self.advance()
+            self.advance()  # skip DEDENT
+
+        print(name, aliases, accepts, matches)
+        return name, aliases, accepts, matches
+
     def expr(self, prev_prec=-1):
         left = self.atom()
-        while self.current().type in OP_MAP:
-            op = self.current().type
+        while self.current().type in OP_MAP or self.current().value in OP_MAP:
+            op = self.current().type if self.current().type in OP_MAP else self.current().value
             op_info = OP_MAP[op]
 
             if op_info.distfix is not None:
@@ -368,9 +362,6 @@ class Parser:
             self.advance()
             return val_type, value
 
-        elif val_type == 'VARIABLE':
-            self.advance()
-            return 'VARIABLE', value
 
         elif val_type == 'IDENT':
             self.advance()
@@ -383,6 +374,14 @@ class Parser:
         elif val_type in OP_MAP and OP_MAP[val_type].prefix is not None:
             self.advance()
             return Expression(val_type, self.expr(OP_MAP[val_type].prefix), 'none_for_unary', line=self.current().line_num)
+
+        elif value in OP_MAP and OP_MAP[value].prefix is not None:
+            self.advance()
+            return Expression(value, self.expr(OP_MAP[value].prefix), 'none_for_unary', line=self.current().line_num)
+
+        elif val_type == 'VARIABLE':
+            self.advance()
+            return 'VARIABLE', value
 
         elif val_type == 'LPAR':
             self.advance()
@@ -403,7 +402,7 @@ class Parser:
                 return 'TUPLE', elements
             else:
                 if self.current().type != 'RPAR':
-                    print_error(tok.line_num, "Expected closing ')'", self.import_map)
+                    print_error(tok.line_num, f"Expected closing ')', found '{self.current().value}'", self.import_map)
                     sys.exit(1)
                 self.advance()
                 if isinstance(first, Expression) and first.operator == 'ASSIGN':
@@ -506,15 +505,23 @@ class Parser:
                 statements.append(Statement('equality', [left, right], line=line, goal=False))
 
         elif self.current().type == 'VARIABLE':
-            self.regress()
-            if self.current().type in ('COLON','BE'): #this is a type
-                self.advance() # var (self)
-                make_operation = False
-            else:
-                self.advance()
-                make_operation = True
+            if self.current().value not in OP_MAP:
+                self.regress()
+                if self.current().type in ('COLON','BE'): #this is a type
+                    self.advance() # var (self)
+                    make_operation = False
+                else:
+                    self.advance()
+                    make_operation = True
 
-            if make_operation:
+                if make_operation:
+                    expr = self.expr()
+                    self.regress()
+                    l = self.current().line
+                    self.advance()
+                    s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
+                    statements.append(s)
+            else:
                 expr = self.expr()
                 self.regress()
                 l = self.current().line
