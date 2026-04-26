@@ -96,7 +96,7 @@ theorem AnSiAn:
     Then:
         ABC = DEF
     Proof:
-        #let G in AB
+        let G in AB
         let G
         let BG = DE
 

@@ -2,8 +2,8 @@
 import MathAxioms
 
 Hypothesis:
-    let a be natural = 2
-    let ex be Tuple = (2,5)
+    let AB = 5
+    let BC = AB
 
 Proof:
-    a equals ex[0]
+    5! equals 120

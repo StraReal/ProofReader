@@ -23,11 +23,11 @@ class Validator:
         self.congruence_pools: Dict[int, Set[str]] = {}  # pool_id → set of ident names
         self._next_pool_id: int = 1
         self.aliases = {}
+        self.known_facts = []
 
         self.variables: Dict[str, [str, any]] = {}
 
     def normalize_comparison(self, left_type, operator, right_type):
-
         if left_type > right_type:
             left_type, right_type = right_type, left_type
 
@@ -48,6 +48,8 @@ class Validator:
             elif kind == 'operation':
                 if item.left_type is None:
                     t = (item.operator, item.right_type)
+                elif item.right_type is None:
+                    t = (item.operator, item.left_type)
                 else:
                     t = self.normalize_comparison(item.left_type, item.operator, item.right_type)
                 self.operations[t] = (item.return_type, item.cases, item.attributes)
@@ -419,7 +421,7 @@ class Validator:
 
         return True
 
-    def solve_expression(self, expression, make_true: bool = False) -> Expression | Tuple[str, any] | None:
+    def solve_expression(self, expression, make_true: bool = False, allow_unknowns: bool = False) -> Expression | Tuple[str, any] | None:
         if isinstance(expression, tuple):
             val = expression[1]
             ex_type = expression[0]
@@ -490,8 +492,13 @@ class Validator:
                     r_pool = r_var[1]['_congruence']
                     if l_pool != r_pool:
                         self.congruence_pools[l_pool].update(self.congruence_pools.pop(r_pool))
-                        for ident in self.congruence_pools[l_pool]:
-                            self.variables[ident][1]['_congruence'] = l_pool
+                        if make_true:
+                            l_pool = l_var[1]['_congruence']
+                            r_pool = r_var[1]['_congruence']
+                            if l_pool != r_pool:
+                                for name, var in self.variables.items():
+                                    if isinstance(var[1], dict) and var[1].get('_congruence') == r_pool:
+                                        var[1]['_congruence'] = l_pool
                 return 'Bool', 'true'
 
         if type(left) == Expression:
@@ -562,13 +569,17 @@ class Validator:
                     match len(name):
                         case 1:
                             l_type = 'special_type_pool'
-                            left_value = self.congruence_pools[left_value['_congruent']]
+                            left_value = left_value['_congruence']
                         case 2:
-                            l_type = 'Int'
-                            left_value = left_value['length'][1]
+                            if left_value['length'][1] is not None:
+                                l_type = 'Int'
+                                left_value = left_value['length'][1]
+                            else:
+                                l_type = 'special_type_pool'
+                                left_value = left_value['_congruence']
                         case n if n > 2:
                             l_type = 'special_type_pool'
-                            left_value = self.congruence_pools[left_value['_congruent']]
+                            left_value = left_value['_congruence']
             else:
                 l_var = self.variables.get(left[1])
                 if l_var is None:
@@ -630,13 +641,21 @@ class Validator:
                         match len(name):
                             case 1:
                                 r_type = 'special_type_pool'
-                                right_value = self.congruence_pools[right_value['_congruence']]
+                                right_value = right_value['_congruence']
                             case 2:
-                                r_type = 'Int'
-                                right_value = right_value['length'][1]
+                                if type(right_value.get('length')) == list:
+                                    if right_value['length'][1] is not None:
+                                        r_type = 'Int'
+                                        right_value = right_value['length'][1]
+                                    else:
+                                        r_type = 'special_type_pool'
+                                        right_value = right_value['_congruence']
+                                else:
+                                    r_type = 'special_type_pool'
+                                    right_value = right_value['length'][1]
                             case n if n > 2:
                                 r_type = 'special_type_pool'
-                                right_value = self.congruence_pools[right_value['_congruence']]
+                                right_value = right_value['_congruence']
                 else:
                     r_var = self.variables.get(right[1])
                     if r_var is None:
@@ -652,6 +671,8 @@ class Validator:
 
         if left_value is None or right_value is None:
             if operator != 'ASSIGN':
+                if allow_unknowns:
+                    return None
                 both_unkn = left_value is None and right_value is None
                 left_str = str(left[1]) if left_value is None else ''
                 right_str = str(right[1]) if right_value is None else ''
@@ -660,17 +681,25 @@ class Validator:
                     self._err(expr.line, f"Cannot calculate expressions with unknowns (given: {given_str})"))
                 return None
 
-        if operator == 'ASSIGN':
-            if r_type not in self.types[l_type][1] and l_type != r_type:
-                self.errors.append(self._err(expr.line, f"Cannot assign {r_type} to {l_type}"))
+        if make_true:
+            if not self.check_match(l_type, r_type, right_value, expr.line):
+                self.errors.append(self._err(expr.line, f"Value does not match constraints for type {l_type}"))
                 return None
-            if make_true:
-                if not self.check_match(l_type, r_type, right_value, expr.line):
-                    self.errors.append(self._err(expr.line, f"Value does not match constraints for type {l_type}"))
-                    return None
-                self.variables[left[1]][1] = right_value
-            return 'Bool', 'true'
+            left_name = left[1]
+            if isinstance(self.variables[left_name][1], dict) and '_congruence' in self.variables[left_name][1]:
+                l_pool = self.variables[left_name][1]['_congruence']
+                r_pool = right_value['_congruence'] if isinstance(right_value, dict) else right_value
+                if l_pool != r_pool:
+                    for name, var in self.variables.items():
+                        if isinstance(var[1], dict) and var[1].get('_congruence') == r_pool:
+                            var[1]['_congruence'] = l_pool
+                if isinstance(right_value, dict) and right_value.get('length', [None, None])[1] is not None:
+                    self.variables[left_name][1]['length'] = right_value['length']
+            else:
+                self.variables[left_name][1] = right_value
         elif operator == 'EQUALS':
+            if l_type == 'special_type_pool' and r_type == 'special_type_pool':
+                return ('Bool', 'true') if left_value == right_value else ('Bool', 'false')
             t = self.normalize_comparison(l_type, operator, r_type)
             op_def = self.operations.get(t)
             if op_def is None:
@@ -733,23 +762,20 @@ class Validator:
                         return None
                     return result
 
-    def _new_pool(self, ident_name: str) -> int:
-        pid = self._next_pool_id
-        self._next_pool_id += 1
-        self.congruence_pools[pid] = {ident_name}
-        return pid
-
     def _create_ident(self, name: str) -> list:
         name = self.normalize_object(name)
         if name.startswith('ang'):
-            entry = ['Namedtuple', {'degrees': ['Int', None]}]
+            pid = self._next_pool_id
+            self._next_pool_id += 1
+            entry = ['Namedtuple', {'_congruence': pid, 'degrees': ['Int', None]}]
         else:
-            pid = self._new_pool(name)
+            pid = self._next_pool_id
+            self._next_pool_id += 1
             match len(name):
                 case 1:
                     entry = ['Namedtuple', {'_congruence': pid, 'radius': ['Int', None]}]
                 case 2:
-                    entry = ['Namedtuple', {'length': ['Int', None]}]
+                    entry = ['Namedtuple', {'_congruence': pid, 'length': ['Int', None]}]
                 case _:
                     entry = ['Namedtuple', {'_congruence': pid, 'area': ['Int', None], 'perimeter': ['Int', None]}]
         self.variables[name] = entry
@@ -794,9 +820,12 @@ class Validator:
                             return
                     else:
                         value = self.solve_expression(value, make_true)
-                if def_type is None:
-                    def_type = value[0]
-                self.variables[stmt_object[1]] = [def_type, value[1] if isinstance(value, tuple) else value]
+                if value is None:
+                    self.variables[stmt_object[1]] = [def_type, None]
+                else:
+                    if def_type is None:
+                        def_type = value[0] if isinstance(value, tuple) else def_type
+                    self.variables[stmt_object[1]] = [def_type, value[1] if isinstance(value, tuple) else value]
 
             elif stmt_object[0] == 'IDENT':
                 value_to_assign = None
@@ -820,7 +849,17 @@ class Validator:
 
                 if value_to_assign is not None:
                     if len(stmt_object[1]) == 2:
-                        ident[1]['length'][1] = value_to_assign
+                        if isinstance(value_to_assign, dict):
+                            l_pool = ident[1]['_congruence']
+                            r_pool = value_to_assign['_congruence']
+                            if l_pool != r_pool:
+                                for var in self.variables.values():
+                                    if isinstance(var[1], dict) and var[1].get('_congruence') == r_pool:
+                                        var[1]['_congruence'] = l_pool
+                            if value_to_assign.get('length', [None, None])[1] is not None:
+                                ident[1]['length'][1] = value_to_assign['length'][1]
+                        else:
+                            ident[1]['length'][1] = value_to_assign
 
             elif stmt_object[0] == 'ANGLE':
                 value_to_assign = None
@@ -903,7 +942,23 @@ class Validator:
         obj_args = raw_args[:len(axiom.let_objects)]
         num_args = raw_args[len(axiom.let_objects):]
 
-        # Generate all permutations for each provided object
+        # General mode: any arg that isn't a multi-char uppercase string
+        is_general = any(
+            not (isinstance(obj, str) and len(obj) > 1 and obj.isupper())
+            for obj in obj_args
+        )
+
+        if is_general:
+            bindings = {}
+            for axiom_var, provided_arg in zip(axiom.let_objects, obj_args):
+                bindings[axiom_var] = provided_arg
+            for numvar, provided_num in zip(axiom.let_numvars, num_args):
+                bindings[numvar] = provided_num
+            if self._check_bindings(axiom, bindings):
+                return bindings
+            return None
+
+        # Geometric permutation logic
         perm_lists = [[''.join(p) for p in permutations(obj)] for obj in obj_args]
 
         for combo in product(*perm_lists):
@@ -949,8 +1004,9 @@ class Validator:
                 obj = hyp.objects[0]
                 if obj in bindings:
                     concrete = bindings[obj]
-                    if not all(p in self.defined_objects for p in concrete):
-                        return False
+                    if isinstance(concrete, str) and len(concrete) > 1 and concrete.isupper():
+                        if not all(p in self.defined_objects for p in concrete):
+                            return False
 
             elif hyp.type == 'let_numvar':
                 continue
@@ -1019,9 +1075,29 @@ class Validator:
 
         return True
 
+    def _has_unknowns(self, stmt):
+        for obj in stmt.objects:
+            if isinstance(obj, str):
+                var = self.variables.get(obj)
+                if var is not None and var[1] is None:
+                    return True
+        return False
+
     def apply_axiom(self, stmt: Statement):
         axiom_name = stmt.objects[0]
-        raw_args = eval(stmt.value)
+        raw_args = []
+        for arg in stmt.value:
+            if isinstance(arg, tuple) and arg[0] == 'VARIABLE':
+                var = self.variables.get(arg[1])
+                if var is not None and var[1] is not None:
+                    raw_args.append(var[1])
+                else:
+                    raw_args.append(arg[1])  # symbolic fallback
+            else:
+                result = self.solve_expression(arg)
+                if result is None:
+                    return False
+                raw_args.append(result[1])
         line = stmt.line
 
         if axiom_name not in self.axioms:
@@ -1056,6 +1132,9 @@ class Validator:
 
         for thesis in axiom.then:
             concrete_stmt = self._concretize_statement(thesis, bindings)
-            self.process_statement(concrete_stmt, is_hypothesis=True)
+            if self._has_unknowns(concrete_stmt):
+                self.known_facts.append(concrete_stmt)
+            else:
+                self.process_statement(concrete_stmt, is_hypothesis=True)
 
         return True

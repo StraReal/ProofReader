@@ -40,6 +40,8 @@ simple_keywords = { #require space or end
     'nor': 'NOR',
     'xor': 'XOR',
     'nand': 'NAND',
+    'mod': 'MODULO',
+    'witness': 'WITNESS',
     #'validate_assignment': 'VALIDATE_ASSIGNMENT',
 }
 
@@ -67,7 +69,7 @@ nonwhitespace_keywords = {
 }
 
 operators = {
-    'mod': 'MODULO',
+    '!': 'FACTORIAL',
     '+': 'PLUS',
     '-': 'MINUS',
     '*': 'MULTIPLY',
@@ -380,7 +382,6 @@ while True:
     import_map = {i + 1: file_tracker[i] for i in range(len(file_tracker))}
     check_balanced(code, import_map)
     tokens = tokenize(code, import_map)
-    print(tokens)
     parser = Parser(tokens, import_map)
     axioms, theorems, hypothesis, proofs, to_import, ordered = parser.parse()
 

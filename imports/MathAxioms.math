@@ -1,12 +1,3 @@
-axiom SideSwitching:
-    Given:
-        let AB
-        let CD
-        let EF
-        AB + CD equals EF
-    Then:
-        AB equals EF - CD
-
 type Bool
 type Int
 type String
@@ -23,10 +14,20 @@ operation Int >= Int -> Bool
 operation isNatural Int -> Bool
     gives first >= 0
 
+operation isEven Int -> Bool
+    gives first mod 2 equals 0
+
 type Nat
     alias natural
     accepts Int
+    witness k equals 0
+    witness k be Nat: self = k + 1
     matches isNatural self
+
+type Even
+    accepts Int
+    witness k be Int: self = 2 * k #TODO IMPORTANT ADDITION: WITNESS LIKE INDUCTIVE TYPES
+    matches isEven self
 
 @[extern neg]
 operation - Int -> Int
@@ -119,8 +120,14 @@ operation Bool and Bool -> Bool
 @[extern or]
 operation Bool or Bool -> Bool
 
+
 operation not Bool -> Bool
     gives first equals false
+
+
+@[extern fact]
+operation Int ! -> Int
+
 
 operation Bool nand Bool -> Bool
     gives not (first and second)
@@ -130,3 +137,12 @@ operation Bool nor Bool -> Bool
 
 operation Bool xor Bool -> Bool
     gives not (first equals second)
+
+
+
+axiom SideSwitching:
+    Given:
+        let a be Int
+        let b be Int
+    Then:
+        a + b equals b + a

@@ -2,10 +2,12 @@ from common_classes import *
 from itertools import combinations
 
 attributes = {}
+HIGHEST_IMPORTANCE = 12 # 1 above the highest defined precedence
 OP_MAP = {  # Use https://docs.python.org/3/reference/expressions.html#operator-precedence for reference
             # TOKEN TYPE |      SYMBOL     | INFIX PREC,LEFT-ASS |  PREFIX PREC   | POSTFIX PREC | DISTFIX (closed) PREC
-            'LBRACKET':   Operator("[",                                                           distfix=("]", 10, True, "INDEXACCESS")),
-            'FIELDACCESS':Operator("'s ",    infix=(10,True)),
+            'LBRACKET':   Operator("[",                                                           distfix=("]", 11, True, "INDEXACCESS")),
+            'FIELDACCESS':Operator("'s ",    infix=(11,True)),
+            'FACTORIAL':  Operator('!',                                             postfix=10),
             'EXPONENT':   Operator('^',      infix=(9, True)),
             'MULTIPLY':   Operator('*',      infix=(7, True)),
             'MODULO':     Operator('mod',    infix=(7, True)),
@@ -83,11 +85,11 @@ class Parser:
                 op = self.parse_operation_definition()
                 if op.left_type is None:
                     if op.operator not in OP_MAP:
-                        OP_MAP[op.operator] = Operator(op.operator, prefix=11)
+                        OP_MAP[op.operator] = Operator(op.operator, prefix=HIGHEST_IMPORTANCE)
                     self.operations[(op.operator, op.right_type)] = (op.return_type, op.cases, op.attributes)
                 else:
                     if op.operator not in OP_MAP:
-                        OP_MAP[op.operator] = Operator(op.operator, infix=(11, True))
+                        OP_MAP[op.operator] = Operator(op.operator, infix=(HIGHEST_IMPORTANCE, True))
                     self.operations[(op.left_type, op.operator, op.right_type)] = (op.return_type, op.cases,
                                                                                    op.attributes)
                 ordered.append(('operation', op))
@@ -95,7 +97,7 @@ class Parser:
             elif self.current().type == 'TYPE':
                 td = self.parse_type()
                 self.types[td[0]] = td[0]
-                ordered.append(('type', td)) # name, aliases, accepts, matches
+                ordered.append(('type', td)) # name, aliases, accepts, matches, witnesses
             elif self.current().type == 'IMPORT':
                 self.advance()
                 if self.current().type == 'VARIABLE':
@@ -225,13 +227,10 @@ class Parser:
     def parse_axiom_bindings(self) -> list:
         raw_args = []
         while self.current().type != 'RBRACE':
-            if self.current().type in ('IDENT', 'NUMBER', 'ANGLE'):
-                raw_args.append(self.current().value)
+            expr = self.expr()
+            raw_args.append(expr)
+            if self.current().type == 'COMMA':
                 self.advance()
-                if self.current().type == 'COMMA':
-                    self.advance()
-            else:
-                break
         return raw_args
 
     def _parse_equality_chain(self, first_operands, left_type, line):
@@ -260,8 +259,11 @@ class Parser:
         if first.value in self.types:
             left_type = first.value
             operator = second.type if second.type in OP_MAP else second.value
-            right_type = self.current().value
-            self.advance()
+            if self.current().type == 'ARROW_TYPE':
+                right_type = None
+            else:
+                right_type = self.current().value
+                self.advance()
         else:
             left_type = None
             operator = first.type if first.type in OP_MAP else first.value
@@ -304,10 +306,10 @@ class Parser:
         aliases = []
         accepts = []
         matches = []
+        witnesses = []
 
         if self.current().type == 'INDENT':
             self.advance()
-            print(self.current().type, name)
             while self.current().type != 'DEDENT':
                 if self.current().type == 'ALIAS':
                     self.advance()
@@ -320,18 +322,34 @@ class Parser:
                 elif self.current().type == 'MATCHES':
                     self.advance()
                     matches.append(self.expr())
+                elif self.current().type == 'WITNESS':
+                    self.advance()
+                    witnesses.append(self.expr())
                 else:
                     self.advance()
             self.advance()  # skip DEDENT
 
-        print(name, aliases, accepts, matches)
-        return name, aliases, accepts, matches
+        return name, aliases, accepts, matches, witnesses
 
     def expr(self, prev_prec=-1):
         left = self.atom()
-        while self.current().type in OP_MAP or self.current().value in OP_MAP:
-            op = self.current().type if self.current().type in OP_MAP else self.current().value
+        while True:
+            tok = self.current()
+            op = tok.type if tok.type in OP_MAP else tok.value if tok.value in OP_MAP else None
+
+            if op is None:
+                break
+
             op_info = OP_MAP[op]
+
+            # Handle postfix (e.g. x!)
+            if op_info.postfix is not None:
+                prec = op_info.postfix
+                if prec <= prev_prec:
+                    break
+                self.advance()
+                left = Expression(op, left, 'none_for_unary', line=tok.line_num)
+                continue
 
             if op_info.distfix is not None:
                 closing, prec, left_assoc, new_op_name = op_info.distfix
@@ -432,7 +450,7 @@ class Parser:
             if self.current().type == 'CONCL_ARROW':
                 self.advance()
                 conclusion = self.parse_statement()
-                statements.append(Statement('axiom_application', [axiom_name], value=str(raw_args), line=line))
+                statements.append(Statement('axiom_application', [axiom_name], value=raw_args, line=line))
                 statements.extend(conclusion)
             return statements
 
@@ -458,6 +476,35 @@ class Parser:
                 if self.current().type == 'ASSIGN':
                     self.advance()
                     value = self.expr()
+                elif self.current().type == 'ISO':
+                    self.advance()
+                    l = self.current().line
+                    base = None
+                    if self.current().type == 'BASE':
+                        self.advance()
+                        base = self.current().value
+                        self.advance()
+                    points = name
+                    if base is None:
+
+                        side1 = points[0] + points[2]
+                        side2 = points[1] + points[2]
+                    else:
+                        non_base = [p for p in points if p not in base]
+                        side1 = base[0] + non_base[0]
+                        side2 = base[1] + non_base[0]
+
+                    expr = Expression(
+                        operator='ASSIGN',
+                        left=('VARIABLE', side1),
+                        right=('VARIABLE', side2),
+                        line=line
+                    )
+                    statements.append(Statement('let', [('IDENT', side1)], value=None, line=line))
+                    statements.append(Statement('let', [('IDENT', side2)], value=None, line=line))
+                    s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
+                    statements.append(s)
+                    self.advance()
                 statements.append(Statement('let', [(name_type, name)], value=value, line=line))
             elif name_type == 'ANGLE':
                 if self.current().type == 'ASSIGN':
@@ -538,13 +585,60 @@ class Parser:
             statements.append(s)
 
         elif self.current().type == 'IDENT':
-            expr = self.expr()
-            self.regress()
-            l = self.current().line
-            self.advance()
-            s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
-            statements.append(s)
+            name = self.current().value
+            if self.current().value not in OP_MAP:
+                self.regress()
+                if self.current().type in ('COLON','BE'): #this is a type
+                    self.advance() # var (self)
+                    make_operation = False
+                else:
+                    self.advance()
+                    make_operation = True
 
+                if make_operation:
+                    expr = self.expr()
+                    self.regress()
+                    l = self.current().line
+                    self.advance()
+                    s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
+                    statements.append(s)
+            else:
+                expr = self.expr()
+                self.regress()
+                l = self.current().line
+                self.advance()
+                s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
+                statements.append(s)
+
+            if self.current().type == 'ISO':
+                self.advance()
+                l = self.current().line
+                base = None
+                if self.current().type == 'BASE':
+                    self.advance()
+                    base = self.current().value
+                    self.advance()
+                points = name
+                if base is None:
+
+                    side1 = points[0] + points[2]
+                    side2 = points[1] + points[2]
+                else:
+                    non_base = [p for p in points if p not in base]
+                    side1 = base[0] + non_base[0]
+                    side2 = base[1] + non_base[0]
+
+                expr = Expression(
+                    operator='ASSIGN',
+                    left=('VARIABLE', side1),
+                    right=('VARIABLE', side2),
+                    line=line
+                )
+                statements.append(Statement('let', [('IDENT', side1)], value=None, line=line))
+                statements.append(Statement('let', [('IDENT', side2)], value=None, line=line))
+                s = Statement('expression', [expr, l.strip()], line=self.current().line_num)
+                statements.append(s)
+                self.advance()
 
         elif self.current().type == 'ANGLE':
             expr = self.expr()
