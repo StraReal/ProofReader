@@ -7,7 +7,7 @@ It defines the .math file format, which is mainly comprised of a Hypothesis bloc
 To facilitate in proofs, you can define types based on existing types, adding constraints.
 
 For example, one could say:
-```math
+```
 operation isEven Int -> Bool
     gives first mod 2 equals 2
     
@@ -31,7 +31,7 @@ This syntax translates to:
 But the most foundational block of any mathematical system are its axioms and, from them, theorems.
 
 In MathLang, an axiom can be defined using this syntax:
-```math
+```
 axiom SideSwitching:
     Given:
         let a be Int
