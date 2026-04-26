@@ -2,8 +2,8 @@
 import MathAxioms
 
 Hypothesis:
-    let a be natural = -2
-    let ex be Namedtuple = (a = 3,c = 5)
+    let a be natural = 2
+    let ex be Tuple = (2,5)
 
 Proof:
-    isNatural 3 is true
+    a equals ex[0]

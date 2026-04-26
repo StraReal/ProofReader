@@ -392,6 +392,33 @@ class Validator:
                     self.variables.pop(k, None)
         return result
 
+    def check_match(self, type_name, value_type, value, line):
+        type_info = self.types.get(type_name)
+        if type_info is None:
+            return True
+
+        matches = type_info[3]
+        if not matches:
+            return True
+
+        # resolve through accepts chain
+        accepted_type = value_type
+        accepts = type_info[2]
+        if value_type == type_name and accepts:
+            accepted_type = accepts[0]  # use the accepted base type
+
+        for match_expr in matches:
+            self.variables['self'] = [accepted_type, value]
+            try:
+                result = self.solve_expression(match_expr)
+            finally:
+                self.variables.pop('self', None)
+
+            if result is None or result[1] != 'true':
+                return False
+
+        return True
+
     def solve_expression(self, expression, make_true: bool = False) -> Expression | Tuple[str, any] | None:
         if isinstance(expression, tuple):
             val = expression[1]
@@ -634,10 +661,13 @@ class Validator:
                 return None
 
         if operator == 'ASSIGN':
-            if self.types[l_type] is None and l_type != r_type:
+            if r_type not in self.types[l_type][1] and l_type != r_type:
                 self.errors.append(self._err(expr.line, f"Cannot assign {r_type} to {l_type}"))
                 return None
             if make_true:
+                if not self.check_match(l_type, r_type, right_value, expr.line):
+                    self.errors.append(self._err(expr.line, f"Value does not match constraints for type {l_type}"))
+                    return None
                 self.variables[left[1]][1] = right_value
             return 'Bool', 'true'
         elif operator == 'EQUALS':
@@ -672,6 +702,19 @@ class Validator:
                         self.errors.append(self._err(expr.line, f"Operation {operator} produced no result"))
                         return None
                     return result
+        elif operator == 'INDEXACCESS':
+            if l_type != 'Tuple':
+                self.errors.append(self._err(expr.line, f"Can't access index of object of type {l_type}."))
+                return None
+            index = right_value
+            if index < 0 or index >= len(left_value):
+                self.errors.append(self._err(expr.line, f"Index {right_value} out of range for '{left[1]}'."))
+                return None
+            element = left_value[index]
+            if element is None:
+                self.errors.append(self._err(expr.line, f"Can't access index {right_value} of '{left[1]}'."))
+                return None
+            return (element[0], element[1])
         else:
             t = self.normalize_comparison(l_type, operator, r_type)
             op_def = self.operations.get(t)
@@ -753,7 +796,7 @@ class Validator:
                         value = self.solve_expression(value, make_true)
                 if def_type is None:
                     def_type = value[0]
-                self.variables[stmt_object[1]] = [def_type, value[1]]
+                self.variables[stmt_object[1]] = [def_type, value[1] if isinstance(value, tuple) else value]
 
             elif stmt_object[0] == 'IDENT':
                 value_to_assign = None
@@ -814,6 +857,11 @@ class Validator:
                     self.variables[variable] = [o_type, None]
                 else:
                     var[0] = o_type
+                    if var[1] is not None:
+                        if not self.check_match(o_type, var[0], var[1], stmt.line):
+                            self.errors.append(
+                                self._err(stmt.line, f"Value does not match constraints for type '{o_type}'"))
+                            self.last_let_failed = True
             else:
                 if stmt.objects[1] in self.aliases:
                     o_type = self.aliases[stmt.objects[1]]
@@ -822,9 +870,13 @@ class Validator:
                         self.variables[variable] = [o_type, None]
                     else:
                         var[0] = o_type
+                        if var[1] is not None:
+                            if not self.check_match(o_type, var[0], var[1], stmt.line):
+                                self.errors.append(
+                                    self._err(stmt.line, f"Value does not match constraints for type '{o_type}'"))
+                                self.last_let_failed = True
                 else:
-                    self.errors.append(self._err(stmt.line,
-                                                 f"Undefined type '{stmt.objects[1]}'"))
+                    self.errors.append(self._err(stmt.line, f"Undefined type '{stmt.objects[1]}'"))
 
         elif stmt.type == 'print':
             print(stmt.objects[0])
