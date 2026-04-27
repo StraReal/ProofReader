@@ -2,8 +2,8 @@
 import MathAxioms
 
 Hypothesis:
-    let AB = 5
-    let BC = AB
+    let b be Int = 5
+    let a be Int = b
 
 Proof:
-    5! equals 120
+    b into c

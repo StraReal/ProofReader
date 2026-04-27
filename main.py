@@ -41,7 +41,9 @@ simple_keywords = { #require space or end
     'xor': 'XOR',
     'nand': 'NAND',
     'mod': 'MODULO',
+    'with witness': 'WITH_WITNESS',
     'witness': 'WITNESS',
+    'getType': 'GETTYPE',
     #'validate_assignment': 'VALIDATE_ASSIGNMENT',
 }
 
@@ -418,9 +420,10 @@ if hypothesis:
     print(f"Hypothesis: {len(hypothesis.statements)} statements")
 print(f"Proofs: {len(proofs)} statements")
 
-print("\n=== Validation ===")
 if validator.errors:
+    cprint("\n=== Validation ===", 'o')
     for error in validator.errors:
-        cprint(f"Error: {error}", 'r')
+        cprint(f"Error: {error}", 'dr')
 else:
-    print("All returned valid")
+    cprint("\n=== Validation ===", 'dc')
+    cprint("All returned valid", 'c')

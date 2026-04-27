@@ -5,6 +5,7 @@ attributes = {}
 HIGHEST_IMPORTANCE = 12 # 1 above the highest defined precedence
 OP_MAP = {  # Use https://docs.python.org/3/reference/expressions.html#operator-precedence for reference
             # TOKEN TYPE |      SYMBOL     | INFIX PREC,LEFT-ASS |  PREFIX PREC   | POSTFIX PREC | DISTFIX (closed) PREC
+            'GETTYPE':    Operator("getType",                         prefix=12),
             'LBRACKET':   Operator("[",                                                           distfix=("]", 11, True, "INDEXACCESS")),
             'FIELDACCESS':Operator("'s ",    infix=(11,True)),
             'FACTORIAL':  Operator('!',                                             postfix=10),
@@ -86,11 +87,11 @@ class Parser:
                 if op.left_type is None:
                     if op.operator not in OP_MAP:
                         OP_MAP[op.operator] = Operator(op.operator, prefix=HIGHEST_IMPORTANCE)
-                    self.operations[(op.operator, op.right_type)] = (op.return_type, op.cases, op.attributes)
+                    self.operations[(op.operator, op.right_type)] = (op.return_type, op.body, op.attributes)
                 else:
                     if op.operator not in OP_MAP:
                         OP_MAP[op.operator] = Operator(op.operator, infix=(HIGHEST_IMPORTANCE, True))
-                    self.operations[(op.left_type, op.operator, op.right_type)] = (op.return_type, op.cases,
+                    self.operations[(op.left_type, op.operator, op.right_type)] = (op.return_type, op.body,
                                                                                    op.attributes)
                 ordered.append(('operation', op))
 
@@ -275,14 +276,31 @@ class Parser:
             return_type = self.current().value
             self.advance()
 
-        cases = []
+        body = []
+        witnesses = []
         self.advance()  # skip colon or newline
         if self.current().type == 'INDENT':
             self.advance()
             while self.current().type != 'DEDENT':
-                case = self.parse_statement()
-                cases.extend(case)
-            self.advance()  # skip DEDENT
+                if self.current().type == 'WITNESS':
+                    self.advance()
+                    var_name = self.current().value
+                    self.advance()
+                    if self.current().type == 'BE':
+                        self.advance()
+                        var_type = self.current().value
+                        self.advance()
+                        self.advance()
+                        expr = self.expr()
+                        witnesses.append(('inductive', var_name, var_type, expr))
+                    elif self.current().type == 'EQUALS' or self.current().type == 'ASSIGN':
+                        self.advance()
+                        expr = self.expr()
+                        witnesses.append(('base', var_name, expr))
+                else:
+                    case = self.parse_statement()
+                    body.extend(case)
+            self.advance()
 
         attributes = self.pending_attributes
         self.pending_attributes = {}
@@ -292,7 +310,8 @@ class Parser:
             operator=operator,
             right_type=right_type,
             return_type=return_type,
-            cases=cases,
+            body=body,
+            witnesses=witnesses,
             attributes=attributes,
         )
 
@@ -306,7 +325,6 @@ class Parser:
         aliases = []
         accepts = []
         matches = []
-        witnesses = []
 
         if self.current().type == 'INDENT':
             self.advance()
@@ -322,14 +340,11 @@ class Parser:
                 elif self.current().type == 'MATCHES':
                     self.advance()
                     matches.append(self.expr())
-                elif self.current().type == 'WITNESS':
-                    self.advance()
-                    witnesses.append(self.expr())
                 else:
                     self.advance()
             self.advance()  # skip DEDENT
 
-        return name, aliases, accepts, matches, witnesses
+        return name, aliases, accepts, matches
 
     def expr(self, prev_prec=-1):
         left = self.atom()

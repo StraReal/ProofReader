@@ -23,7 +23,7 @@ class Validator:
         self.congruence_pools: Dict[int, Set[str]] = {}  # pool_id → set of ident names
         self._next_pool_id: int = 1
         self.aliases = {}
-        self.known_facts = []
+        self.facts = []
 
         self.variables: Dict[str, [str, any]] = {}
 
@@ -52,7 +52,7 @@ class Validator:
                     t = (item.operator, item.left_type)
                 else:
                     t = self.normalize_comparison(item.left_type, item.operator, item.right_type)
-                self.operations[t] = (item.return_type, item.cases, item.attributes)
+                self.operations[t] = (item.return_type, item.body, item.attributes)
             elif kind == 'type':
                 self.types[item[0]] = item
                 for alias in item[1]:
@@ -353,7 +353,6 @@ class Validator:
 
     def call_extern(self, extern_name: str, left_value, right_value, line, ret_type):
         """Call an external function by name"""
-
         if extern_name in externs:
             extern_func = externs[extern_name]
             if left_value == 'true': left_value = True
@@ -422,6 +421,9 @@ class Validator:
         return True
 
     def solve_expression(self, expression, make_true: bool = False, allow_unknowns: bool = False) -> Expression | Tuple[str, any] | None:
+        if make_true:
+            self.facts.append(expression)
+            print(self.facts)
         if isinstance(expression, tuple):
             val = expression[1]
             ex_type = expression[0]
@@ -431,7 +433,7 @@ class Validator:
         if isinstance(expression, Statement):
             if expression.type == 'gives':
                 expr_to_evaluate = expression.objects[0]
-                return self.solve_expression(expr_to_evaluate, make_true)
+                return self.solve_expression(expr_to_evaluate)
             else:
                 self.solve_expression(expression, make_true=True)
                 return None
@@ -441,6 +443,7 @@ class Validator:
 
         left = getattr(expression, 'left', None)
         right = getattr(expression, 'right', None)
+
         expr = expression
         operator = expression.operator
 
@@ -456,7 +459,7 @@ class Validator:
                 self.errors.append(self._err(expr.line, f"No field '{field_name}' in '{tuple_name}'"))
                 return None
             if make_true:
-                right_val = self.solve_expression(right, make_true)
+                right_val = self.solve_expression(right)
                 field[0] = right_val[0]
                 field[1] = right_val[1]
             return ('Bool', 'true')
@@ -472,7 +475,7 @@ class Validator:
                 self.errors.append(self._err(expr.line, f"Index {index} out of range for '{tuple_name}'"))
                 return None
             if make_true:
-                right_val = self.solve_expression(right, make_true)
+                right_val = self.solve_expression(right)
                 t_var[1][index] = (right_val[0], right_val[1])
             return ('Bool', 'true')
 
@@ -491,7 +494,6 @@ class Validator:
                     l_pool = l_var[1]['_congruence']
                     r_pool = r_var[1]['_congruence']
                     if l_pool != r_pool:
-                        self.congruence_pools[l_pool].update(self.congruence_pools.pop(r_pool))
                         if make_true:
                             l_pool = l_var[1]['_congruence']
                             r_pool = r_var[1]['_congruence']
@@ -502,16 +504,17 @@ class Validator:
                 return 'Bool', 'true'
 
         if type(left) == Expression:
-            left = self.solve_expression(expression.left, make_true)
+            left = self.solve_expression(expression.left)
             expression.left = left
         if type(right) == Expression:
-            right = self.solve_expression(expression.right, make_true)
+            right = self.solve_expression(expression.right)
             expression.right = right
 
         if left is None:
             return None
         if right is None:
             return None
+
 
         if right == 'none_for_unary':
             if left[0] == 'VARIABLE':
@@ -526,6 +529,10 @@ class Validator:
                 if left[0].upper().startswith('LIT'):
                     x_type = x_type[3:].capitalize()
                 x_value = left[1]
+
+            if operator == 'GETTYPE':
+                print(x_type, x_value)
+                return 'Type', x_type
 
             if x_value is None:
                 self.errors.append(self._err(expr.line, f"Cannot calculate expression with unknown (given: {left[1]})"))
@@ -595,6 +602,7 @@ class Validator:
             if left[0].upper().startswith('LIT'):
                 l_type = l_type[3:].capitalize()
             left_value = left[1]
+
 
         if right[0] == 'VARIABLE':
             if operator == 'FIELDACCESS':
@@ -818,6 +826,13 @@ class Validator:
                                                field_value[1] if field_value else None])
                             self.variables[stmt_object[1]] = ['Tuple', fields]
                             return
+                        elif value[0] == 'VARIABLE':
+                            ref = self.variables.get(value[1])
+                            if ref is not None:
+                                def_type = ref[0]
+                                value = ref[1]
+                            else:
+                                value = None
                     else:
                         value = self.solve_expression(value, make_true)
                 if value is None:
@@ -1083,6 +1098,17 @@ class Validator:
                     return True
         return False
 
+    def has_fact(self, expr):
+        return any(self.expressions_equal(expr, f) for f in self.facts)
+
+    def expressions_equal(self, a, b):
+        if type(a) != type(b):
+            return False
+        if isinstance(a, Expression):
+            return a.operator == b.operator and self.expressions_equal(a.left, b.left) and self.expressions_equal(
+                a.right, b.right)
+        return a == b
+
     def apply_axiom(self, stmt: Statement):
         axiom_name = stmt.objects[0]
         raw_args = []
@@ -1133,7 +1159,7 @@ class Validator:
         for thesis in axiom.then:
             concrete_stmt = self._concretize_statement(thesis, bindings)
             if self._has_unknowns(concrete_stmt):
-                self.known_facts.append(concrete_stmt)
+                self.facts.append(concrete_stmt)
             else:
                 self.process_statement(concrete_stmt, is_hypothesis=True)
 

@@ -15,6 +15,7 @@ operation isNatural Int -> Bool
     gives first >= 0
 
 operation isEven Int -> Bool
+    witness k be Int: self = 2 * k #TODO IMPORTANT ADDITION: WITNESS LIKE INDUCTIVE TYPES
     gives first mod 2 equals 0
 
 type Nat
@@ -26,7 +27,6 @@ type Nat
 
 type Even
     accepts Int
-    witness k be Int: self = 2 * k #TODO IMPORTANT ADDITION: WITNESS LIKE INDUCTIVE TYPES
     matches isEven self
 
 @[extern neg]

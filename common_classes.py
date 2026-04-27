@@ -9,7 +9,8 @@ class OperationDefinition:
     operator: str
     right_type: str
     return_type: str
-    cases: list  # pattern matching cases
+    body: list
+    witnesses: list
     attributes: dict
 
 @dataclass(slots=True, frozen=True)
@@ -105,6 +106,20 @@ def cprint(text, color="w") -> None:
         "m": "\033[95m",
         "c": "\033[96m",
         "w": "\033[97m",
+        "o": "\033[38;5;208m",
+
+        "dr": "\033[31m",
+        "dc": "\033[36m",
+
+        "red": "\033[91m",
+        "green": "\033[92m",
+        "yellow": "\033[93m",
+        "blue": "\033[94m",
+        "magenta": "\033[95m",
+        "cyan": "\033[96m",
+        "white": "\033[97m",
+        "orange": "\033[38;5;208m",
+        "gray": "\033[90m",
     }
     RESET = "\033[0m"
     print(f"{colors.get(color, colors['w'])}{text}{RESET}")
