@@ -25,6 +25,9 @@ class Validator:
         self._next_pool_id: int = 1
         self.aliases = {}
         self.facts = []
+        self.call_depth = 0
+        self.max_call_depth = 1000
+        sys.setrecursionlimit((2**31)-1)
 
         self.variables: Dict[str, [str, any]] = {}
 
@@ -393,7 +396,12 @@ class Validator:
                 self.solve_expression(statement, make_true=True)
         return None
 
-    def _call_op(self, op_def, bindings, witnessed=False):
+    def _call_op(self, op_def, bindings, witnessed=False, line=0):
+        self.call_depth += 1
+        if self.call_depth > self.max_call_depth:
+            self.call_depth = 0
+            cprint(self._err(line, f"Recursion limit exceeded ({self.max_call_depth})"), 'dr')
+            sys.exit(1)
         saved = dict(self.variables)
         self.variables.update(bindings)
         result = None
@@ -589,10 +597,10 @@ class Validator:
                 if expr.witness:
                     witness_val = self.solve_expression(expr.witness)
                     result = self._call_op(op_def, {'k': [witness_val[0], witness_val[1]], 'first': [x_type, x_value]},
-                                           witnessed=True)
+                                           witnessed=True, line=expr.line)
                     return result
                 else:
-                    result = self._call_op(op_def, {'first': [x_type, x_value]})
+                    result = self._call_op(op_def, {'first': [x_type, x_value]}, line=expr.line)
                     if result is None:
                         self.errors.append(self._err(expr.line, f"Operation {operator} produced no result"))
                         return None
@@ -839,7 +847,7 @@ class Validator:
                     extern_name = op_def[2]['extern'][0]
                     return self.call_extern(extern_name, left_value, right_value, expr.line, op_def[0])
                 else:
-                    result = self._call_op(op_def, {'first': [l_type, left_value], 'second': [r_type, right_value]})
+                    result = self._call_op(op_def, {'first': [l_type, left_value], 'second': [r_type, right_value]}, line=expr.line)
                     if result is None:
                         self.errors.append(self._err(expr.line, f"Operation {operator} produced no result"))
                         return None
