@@ -2,10 +2,10 @@
 import MathAxioms
 
 Hypothesis:
-    let a be Int
-    let b be Int = 2*a
+    let c be Int = 245 # you can change this to anything!
 
 Proof:
-    let t = (isEven b with witness 2)
-    ((2+3 equals 5) equals (isEven b with witness 2)) is true #correctly errors out, switch to "false" and it will work.
-    t is false
+    if c mod 2 equals 0
+        isEven c with witness c div 2
+    else
+        isEven (c+1) with witness (c div 2)+1

@@ -43,7 +43,7 @@ class Expression:
     operator: str
     left: 'Expression| Tuple[str, any]'
     right: 'Expression| Tuple[str, any]|str'
-    witness: 'Expression| Tuple[str, any]|None'
+    witness: 'Expression| Tuple[str, any]|None' = None
     line: int = None
 
 @dataclass

@@ -12,6 +12,7 @@ OP_MAP = {  # Use https://docs.python.org/3/reference/expressions.html#operator-
             'EXPONENT':   Operator('^',      infix=(9, True)),
             'MULTIPLY':   Operator('*',      infix=(7, True)),
             'MODULO':     Operator('mod',    infix=(7, True)),
+            'INT_DIV':    Operator('div',    infix=(7, True)),
             'DIVIDE':     Operator('/',      infix=(7, True)),
             'PLUS':       Operator('+',      infix=(6, True)),
             'MINUS':      Operator('-',      infix=(6, True) ,        prefix=8),
@@ -276,6 +277,13 @@ class Parser:
             return_type = self.current().value
             self.advance()
 
+        if left_type is None:
+            if operator not in OP_MAP:
+                OP_MAP[operator] = Operator(operator, prefix=HIGHEST_IMPORTANCE)
+        else:
+            if operator not in OP_MAP:
+                OP_MAP[operator] = Operator(operator, infix=(HIGHEST_IMPORTANCE, True))
+
         body = []
         witnesses = []
         self.advance()  # skip colon or newline
@@ -459,6 +467,17 @@ class Parser:
             print_error(tok.line_num, f"Expected operand, got {val_type}", self.import_map)
             sys.exit(1)
 
+    def parse_block(self):
+        statements = []
+        print(self.current().type)
+        if self.current().type == 'INDENT':
+            self.advance()
+            while self.current().type != 'DEDENT':
+                stmt = self.parse_statement()
+                statements.extend(stmt)
+            self.advance()  # skip DEDENT
+        return statements
+
     def parse_statement(self) -> List[Statement]:
         statements = []
         line = self.current().line_num
@@ -541,45 +560,19 @@ class Parser:
                     value = self.expr()
                 statements.append(Statement('let', [(name_type, name)], value=value, line=line))
 
-        elif self.current().type == 'NUMVAR':
-            left = self.current().value
+        elif self.current().type == 'IF':
             self.advance()
-            left_operands = self.parse_sum_operands(left, ('NUMBER', 'IDENT', 'ANGLE', 'NUMVAR'))
-            if self.current().type in ('ASSIGN', 'EQUALS'):
-                sides = [(left_operands, None, None)]
-                while self.current().type in ('ASSIGN', 'EQUALS'):
-                    self.advance()
-                    rhs = self.parse_rhs(('NUMVAR', 'ANGLE', 'IDENT', 'NUMBER'), line)
-                    if rhs[0] == 'single':
-                        _, right, right_type = rhs
-                        sides.append(([('+', right)], right_type, right))
-                    else:
-                        _, right_operands = rhs
-                        sides.append((right_operands, None, None))
-                for i in range(len(sides) - 1):
-                    left_ops = sides[i][0]
-                    right_ops = sides[i + 1][0]
-                    right_type = sides[i + 1][1]
-                    right_val = sides[i + 1][2]
-                    if right_val is not None and right_type in ('NUMBER', 'NUMVAR'):
-                        if len(left_ops) == 1:
-                            statements.append(Statement('assignment', [left_ops[0][1], right_val], line=line))
-                        else:
-                            statements.append(Statement('sum_assignment', [left_ops, right_val], line=line))
-                    elif right_val is not None:
-                        if len(left_ops) == 1:
-                            statements.append(Statement('equality', [left_ops[0][1], right_val], line=line))
-                        else:
-                            statements.append(Statement('sum_equality', [left_ops, right_ops], line=line))
-                    else:
-                        statements.append(Statement('sum_equality', [left_ops, right_ops], line=line))
-
-            if self.current().type == 'INEQUALS':
+            condition = self.expr()
+            self.advance()  # skip newline
+            then_block = self.parse_block()
+            else_block = []
+            if self.current().type == 'ELSE':
                 self.advance()
-                right = self.current().value
                 self.advance()
-                statements.append(Statement('equality', [left, right], line=line, goal=False))
-
+                else_block = self.parse_block()
+            s=Statement('if', [condition, then_block, else_block])
+            statements.append(s)
+            print(s)
 
         elif self.current().type == 'VARIABLE':
             if self.current().value not in OP_MAP:

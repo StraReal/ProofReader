@@ -12,7 +12,7 @@ operation Int >= Int -> Bool
     gives first > second or first equals second
 
 operation isNatural Int -> Bool
-    gives first >= 0
+    gives first>=0
 
 operation isEven Int -> Bool
     gives first mod 2 equals 0
@@ -44,6 +44,9 @@ operation Int > Int -> Bool
 
 @[extern lt]
 operation Int < Int -> Bool
+
+@[extern int_div]
+operation Int div Int -> Int
 
 operation Int != Int -> Bool
     gives not (first equals second)

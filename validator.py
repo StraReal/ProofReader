@@ -376,8 +376,27 @@ class Validator:
                 self._err(line, f"Unknown external function '{extern_name}'"))
             return None
 
+    def _execute_block(self, block):
+        for statement in block:
+            if not isinstance(statement, Statement):
+                continue
+            if statement.type == 'gives':
+                return self.solve_expression(statement)
+            elif statement.type == 'if':
+                condition, then_block, else_block = statement.objects
+                print(f"IF condition: {condition}, vars: {self.variables.get('first')}")  # debug
+                cond_result = self.solve_expression(condition)
+                print(f"IF result: {cond_result}")  # debug
+                chosen_block = then_block if (cond_result is not None and cond_result[1] == 'true') else else_block
+                result = self._execute_block(chosen_block)
+                if result is not None:
+                    return result
+            else:
+                self.solve_expression(statement, make_true=True)
+        return None
+
     def _call_op(self, op_def, bindings, witnessed=False):
-        saved = {k: self.variables[k] for k in bindings if k in self.variables}
+        saved = dict(self.variables)
         self.variables.update(bindings)
         result = None
         try:
@@ -413,18 +432,9 @@ class Validator:
                 else:
                     result = (op_def[0], 'false')
             else:
-                for statement in op_def[1]:
-                    if isinstance(statement, Statement) and statement.type == 'gives':
-                        result = self.solve_expression(statement)
-                        break
-                    else:
-                        self.solve_expression(statement, make_true=True)
+                result = self._execute_block(op_def[1])
         finally:
-            for k in bindings:
-                if k in saved:
-                    self.variables[k] = saved[k]
-                else:
-                    self.variables.pop(k, None)
+            self.variables = saved
         return result
 
     def canonicalize_expression(self, expr):
@@ -533,10 +543,8 @@ class Validator:
 
         if type(left) == Expression:
             left = self.solve_expression(expression.left)
-            expression.left = left
         if type(right) == Expression:
             right = self.solve_expression(expression.right)
-            expression.right = right
 
         if type(left) == tuple and left[0]=='VARIABLE':
             left = self.solve_expression(left)
@@ -804,7 +812,6 @@ class Validator:
                 if val[1] is None:
                     l_type = val[0]
                     break
-            expr.left = ("VARIABLE", left_value)
             while r_type == 'VARIABLE':
                 val = self.variables.get(right_value)
                 if val is None:
@@ -815,7 +822,6 @@ class Validator:
                 if val[1] is None:
                     r_type = val[0]
                     break
-            expr.right = ("VARIABLE", right_value)
 
             t = self.normalize_comparison(l_type, operator, r_type)
             op_def = self.operations.get(t)
@@ -888,6 +894,7 @@ class Validator:
 
     def process_statement(self, stmt: Statement, is_hypothesis: bool):
         make_true = is_hypothesis or (stmt.in_let and not self.last_let_failed)
+        print('s',stmt)
         if self.contradictory:
             return
         elif stmt.type == 'axiom_application':
@@ -1046,6 +1053,18 @@ class Validator:
                         if res[1] == 'false':
                             self.errors.append(self._err(stmt.line,
                                                          f"'{stmt.objects[1]}' is false"))
+
+        elif stmt.type == 'if':
+            condition, then_block, else_block = stmt.objects
+            cond_result = self.solve_expression(condition)
+            if cond_result is not None and cond_result[1] == 'true':
+                print('t', then_block)
+                for s in then_block:
+                    self.process_statement(s, is_hypothesis)
+            else:
+                print('e', else_block)
+                for s in else_block:
+                    self.process_statement(s, is_hypothesis)
 
         else:
             print(f"Unknown statement type {stmt.type}")
@@ -1231,10 +1250,9 @@ class Validator:
 
         axiom = self.axioms[axiom_name]
 
-        if len(raw_args) != len(axiom.let_objects) + len(axiom.let_numvars):
+        if len(raw_args) != len(axiom.let_objects):
             self.errors.append(self._err(line,
-                                         f"Axiom '{axiom_name}' expects {len(axiom.let_objects)} object(s) "
-                                         f"and {len(axiom.let_numvars)} numvar(s), got {len(raw_args)}"))
+                                         f"Axiom '{axiom_name}' expects {len(axiom.let_objects)} object(s), got {len(raw_args)}"))
             return False
 
         bindings = self._build_bindings(axiom, raw_args)

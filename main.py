@@ -33,9 +33,12 @@ simple_keywords = { #require space or end
     'xor': 'XOR',
     'nand': 'NAND',
     'mod': 'MODULO',
+    'div': 'INT_DIV',
     'with witness': 'WITH_WITNESS',
     'witness': 'WITNESS',
     'getType': 'GETTYPE',
+    'if': 'IF',
+    'else': 'ELSE',
     #'validate_assignment': 'VALIDATE_ASSIGNMENT',
 }
 
@@ -44,8 +47,6 @@ colon_keywords = {
     'Given': 'GIVEN',
     'Hypothesis': 'HYPOTHESIS',
     'Proof': 'PROOF',
-    'if': 'IF',
-    'else': 'ELSE',
 }
 
 nonwhitespace_keywords = {
@@ -282,11 +283,8 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
 
             elif match := re.match(r'[a-z_][a-zA-Z0-9_]* ', line[pos:]):
                 word = match.group(0).strip()
-                if re.match(r'^[a-z]_\d+$', word):
-                    tokens.append(Token('NUMVAR', word, line_num, line))
-                else:
-                    if not word.isupper():
-                        tokens.append(Token('VARIABLE', word, line_num, line))
+                if not word.isupper():
+                    tokens.append(Token('VARIABLE', word, line_num, line))
                 pos += len(word)
                 continue
 
