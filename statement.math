@@ -1,5 +1,10 @@
 #import BasicAxioms
 import MathAxioms
 
+Hypothesis:
+    let a be Int
+    let b be Int = 2*2
+
 Proof:
-    isPrime 109634676790329653387
+    isPrime 12
+    isEven b with witness 2

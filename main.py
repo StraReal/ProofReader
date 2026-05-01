@@ -406,7 +406,7 @@ for name, axiom in axioms.items():
 
 print("=== Parsed ===")
 if hypothesis:
-    print(f"Hypothesis: {len(hypothesis.statements)} statements")
+    print(f"Hypothesis: {len(hypothesis)} statements")
 print(f"Proofs: {len(proofs)} statements")
 
 if validator.errors:

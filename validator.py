@@ -64,7 +64,7 @@ class Validator:
                     self.aliases[alias] = item[0]
 
         if hypothesis:
-            for stmt in hypothesis.statements:
+            for stmt in hypothesis:
                 self.process_statement(stmt, is_hypothesis=True)
 
 
@@ -481,12 +481,13 @@ class Validator:
             else:
                 self.solve_expression(expression, make_true=True)
                 return None
-
+        print('e', expression)
         if expression.operator == 'pass':
             return 'Bool', 'true'
 
         left = getattr(expression, 'left', None)
         right = getattr(expression, 'right', None)
+        print('re', right)
 
         expr = expression
         operator = expression.operator
@@ -548,15 +549,19 @@ class Validator:
                 return 'Bool', 'true'
 
         if type(left) == Expression:
-            left = self.solve_expression(expression.left)
+            left = self.solve_expression(left)
         if type(right) == Expression:
-            right = self.solve_expression(expression.right)
+            right = self.solve_expression(right)
 
         if type(left) == tuple and left[0]=='VARIABLE':
             left = self.solve_expression(left)
+            if isinstance(left, tuple) and left[0] == 'VARIABLE':
+                expression.left = left
 
         if type(right) == tuple and right[0]=='VARIABLE':
             right = self.solve_expression(right)
+            if isinstance(right, tuple) and right[0] == 'VARIABLE':
+                expression.right = right
 
         if left is None:
             return None

@@ -18,10 +18,6 @@ operation isEven Int -> Bool
     gives first mod 2 equals 0
     witness k be Int: first equals 2 * k
 
-operation isTrue Int -> Bool
-    gives not (first equals 0)
-    witness k be Bool: k equals false
-
 operation Int gcd Int -> Int
     if second equals 0
         gives first

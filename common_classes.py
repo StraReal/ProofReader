@@ -53,10 +53,6 @@ class AxiomApplication:
     line: int
 
 @dataclass
-class HypothesisBlock:
-    statements: List['Statement']
-
-@dataclass
 class AxiomDefinition:
     name: str
     given: List[Statement]

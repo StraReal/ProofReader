@@ -55,7 +55,7 @@ class Parser:
     def regress(self):
         self.pos -= 1
 
-    def parse(self) -> tuple[Dict[str, AxiomDefinition], Dict[str, TheoremDefinition], Optional[HypothesisBlock], List[Statement], list, list]:
+    def parse(self) -> tuple[Dict[str, AxiomDefinition], Dict[str, TheoremDefinition], Optional[list], List[Statement], list, list]:
         hypothesis = None
         proofs = []
         ordered = []
@@ -108,6 +108,7 @@ class Parser:
                 self.advance()
                 if self.current().type == 'COLON':
                     self.advance()
+                self.advance()
                 hypothesis = self.parse_block()
             else:
                 stmt = self.parse_statement()
