@@ -4,8 +4,15 @@ import MathAxioms
 Hypothesis:
     let c be Int = 245 # you can change this to anything!
 
+
 Proof:
     if c mod 2 equals 0
         isEven c with witness c div 2
     else
         isEven (c+1) with witness (c div 2)+1
+
+    4 gcd 2 equals 2
+
+    18 gcd 8 equals 2
+
+    19 gcd 1 != 2

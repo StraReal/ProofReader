@@ -384,9 +384,7 @@ class Validator:
                 return self.solve_expression(statement)
             elif statement.type == 'if':
                 condition, then_block, else_block = statement.objects
-                print(f"IF condition: {condition}, vars: {self.variables.get('first')}")  # debug
                 cond_result = self.solve_expression(condition)
-                print(f"IF result: {cond_result}")  # debug
                 chosen_block = then_block if (cond_result is not None and cond_result[1] == 'true') else else_block
                 result = self._execute_block(chosen_block)
                 if result is not None:
@@ -894,7 +892,6 @@ class Validator:
 
     def process_statement(self, stmt: Statement, is_hypothesis: bool):
         make_true = is_hypothesis or (stmt.in_let and not self.last_let_failed)
-        print('s',stmt)
         if self.contradictory:
             return
         elif stmt.type == 'axiom_application':
@@ -1058,11 +1055,9 @@ class Validator:
             condition, then_block, else_block = stmt.objects
             cond_result = self.solve_expression(condition)
             if cond_result is not None and cond_result[1] == 'true':
-                print('t', then_block)
                 for s in then_block:
                     self.process_statement(s, is_hypothesis)
             else:
-                print('e', else_block)
                 for s in else_block:
                     self.process_statement(s, is_hypothesis)
 

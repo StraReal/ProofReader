@@ -469,7 +469,6 @@ class Parser:
 
     def parse_block(self):
         statements = []
-        print(self.current().type)
         if self.current().type == 'INDENT':
             self.advance()
             while self.current().type != 'DEDENT':
@@ -481,7 +480,6 @@ class Parser:
     def parse_statement(self) -> List[Statement]:
         statements = []
         line = self.current().line_num
-        line_val = self.current().line
 
         if self.current().type == 'VARIABLE' and self.pos + 1 < len(self.tokens) and self.tokens[
             self.pos + 1].type == 'LBRACE':
@@ -570,9 +568,7 @@ class Parser:
                 self.advance()
                 self.advance()
                 else_block = self.parse_block()
-            s=Statement('if', [condition, then_block, else_block])
-            statements.append(s)
-            print(s)
+            statements.append(Statement('if', [condition, then_block, else_block]))
 
         elif self.current().type == 'VARIABLE':
             if self.current().value not in OP_MAP:

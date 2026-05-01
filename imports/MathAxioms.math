@@ -22,6 +22,11 @@ operation isTrue Int -> Bool
     gives not (first equals 0)
     witness k be Bool: k equals false
 
+operation Int gcd Int -> Int
+    if second equals 0
+        gives first
+    gives second gcd (first mod second)
+
 
 @[extern neg]
 operation - Int -> Int
