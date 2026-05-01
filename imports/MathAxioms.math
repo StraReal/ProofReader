@@ -15,19 +15,13 @@ operation isNatural Int -> Bool
     gives first >= 0
 
 operation isEven Int -> Bool
-    witness k be Int: self = 2 * k #TODO IMPORTANT ADDITION: WITNESS LIKE INDUCTIVE TYPES
     gives first mod 2 equals 0
+    witness k be Int: first equals 2 * k
 
-type Nat
-    alias natural
-    accepts Int
-    witness k equals 0
-    witness k be Nat: self = k + 1
-    matches isNatural self
+operation isTrue Int -> Bool
+    gives not (first equals 0)
+    witness k be Bool: k equals false
 
-type Even
-    accepts Int
-    matches isEven self
 
 @[extern neg]
 operation - Int -> Int
@@ -35,32 +29,11 @@ operation - Int -> Int
 @[extern mod]
 operation Int mod Int -> Int
 
-# nat and int
 @[extern add]
 operation Int + Int -> Int
 
-@[extern add]
-operation Int + Nat -> Int
-
-@[extern add]
-operation Nat + Nat -> Nat
-
-
-@[extern mul]
-operation Nat * Nat -> Nat
-
-@[extern mul]
-operation Int * Nat -> Int
-
 @[extern mul]
 operation Int * Int -> Int
-
-
-@[extern exp]
-operation Nat ^ Nat -> Nat
-
-@[extern exp]
-operation Int ^ Nat -> Int
 
 @[extern exp]
 operation Int ^ Int -> Int
@@ -75,43 +48,10 @@ operation Int < Int -> Bool
 operation Int != Int -> Bool
     gives not (first equals second)
 
-operation Nat != Int -> Bool
-    gives not (first equals second)
-
-operation Nat != Nat -> Bool
-    gives not (first equals second)
-
-
-@[extern gt]
-operation Nat > Nat -> Bool
-
-@[extern lt]
-operation Nat < Nat -> Bool
-
-
-operation Nat <= Nat -> Bool
-    gives (first < second) or (first equals second)
-
-operation Nat >= Nat -> Bool
-    gives (first > second) or (first equals second)
-
-
-@[extern sub]
-operation Nat - Nat -> Int
-
-@[extern sub]
-operation Int - Nat -> Int
-
 @[extern sub]
 operation Int - Int -> Int
 
-@[extern eq_comp]
-operation Int equals Nat -> Bool
-
 operation Int != Int -> Bool
-    gives not first equals second
-
-operation Nat != Nat -> Bool
     gives not first equals second
 
 @[extern and]
@@ -119,7 +59,6 @@ operation Bool and Bool -> Bool
 
 @[extern or]
 operation Bool or Bool -> Bool
-
 
 operation not Bool -> Bool
     gives first equals false

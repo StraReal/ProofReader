@@ -42,8 +42,15 @@ class Literal:
 class Expression:
     operator: str
     left: 'Expression| Tuple[str, any]'
-    right: 'Expression| Tuple[str, any]'
+    right: 'Expression| Tuple[str, any]|str'
+    witness: 'Expression| Tuple[str, any]|None'
     line: int = None
+
+@dataclass
+class AxiomApplication:
+    axiom_name: str
+    bindings: Dict[str, str]  # {'ABC': 'ABC', 'DEF': 'GHI'}
+    line: int
 
 @dataclass
 class HypothesisBlock:
@@ -83,7 +90,8 @@ def load_file(filename: str) -> str:
 
 def print_error(line, msg, import_map):
     file, lineno = get_infile_line(line, import_map)
-    print(f"{file} | Line {lineno}: {msg}")
+    cprint(f"{file} | Line {lineno}: {msg}", 'dr')
+    sys.exit(1)
 
 def get_infile_line(line_num, import_map):
     if line_num in import_map:

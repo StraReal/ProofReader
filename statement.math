@@ -2,8 +2,8 @@
 import MathAxioms
 
 Hypothesis:
-    let b be Int = 5
-    let a be Int = b
+    let a be Int
+    let b be Int = 2*a
 
 Proof:
-    b into c
+    isEven b with witness a

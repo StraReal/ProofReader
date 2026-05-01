@@ -1,13 +1,5 @@
-import re
-
 from parser import *
 from validator import *
-
-@dataclass
-class AxiomApplication:
-    axiom_name: str
-    bindings: Dict[str, str]  # {'ABC': 'ABC', 'DEF': 'GHI'}
-    line: int
 
 simple_keywords = { #require space or end
     'let': 'LET',
@@ -421,7 +413,7 @@ if hypothesis:
 print(f"Proofs: {len(proofs)} statements")
 
 if validator.errors:
-    cprint("\n=== Validation ===", 'o')
+    cprint("\n=== Validation ===", 'r')
     for error in validator.errors:
         cprint(f"Error: {error}", 'dr')
 else:

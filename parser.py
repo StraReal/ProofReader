@@ -283,6 +283,8 @@ class Parser:
             self.advance()
             while self.current().type != 'DEDENT':
                 if self.current().type == 'WITNESS':
+                    if return_type != "Bool":
+                        print_error(self.current().line_num, f"Witnesses are only allowed in operations with a Bool return type. Found: {return_type}", self.import_map)
                     self.advance()
                     var_name = self.current().value
                     self.advance()
@@ -363,7 +365,7 @@ class Parser:
                 if prec <= prev_prec:
                     break
                 self.advance()
-                left = Expression(op, left, 'none_for_unary', line=tok.line_num)
+                left = Expression(op, left, 'none_for_unary', witness=None, line=tok.line_num)
                 continue
 
             if op_info.distfix is not None:
@@ -376,14 +378,14 @@ class Parser:
                     print_error(self.current().line_num, f"Expected '{closing}'", self.import_map)
                     sys.exit(1)
                 self.advance()
-                left = Expression(new_op_name, left, inner, line=self.current().line_num)
+                left = Expression(new_op_name, left, inner, witness=None, line=self.current().line_num)
                 continue
 
             if op_info.infix is None or op_info.infix[0] <= prev_prec:
                 break
             prec, left_assoc = op_info.infix
             self.advance()
-            left = Expression(op, left, self.expr(prec if left_assoc else prec - 1), line=self.current().line_num)
+            left = Expression(op, left, self.expr(prec if left_assoc else prec - 1), witness=None, line=self.current().line_num)
         return left
 
     def atom(self):
@@ -406,11 +408,11 @@ class Parser:
 
         elif val_type in OP_MAP and OP_MAP[val_type].prefix is not None:
             self.advance()
-            return Expression(val_type, self.expr(OP_MAP[val_type].prefix), 'none_for_unary', line=self.current().line_num)
+            return Expression(val_type, self.expr(OP_MAP[val_type].prefix), 'none_for_unary', witness=None, line=self.current().line_num)
 
         elif value in OP_MAP and OP_MAP[value].prefix is not None:
             self.advance()
-            return Expression(value, self.expr(OP_MAP[value].prefix), 'none_for_unary', line=self.current().line_num)
+            return Expression(value, self.expr(OP_MAP[value].prefix), 'none_for_unary', witness=None, line=self.current().line_num)
 
         elif val_type == 'VARIABLE':
             self.advance()
@@ -566,18 +568,22 @@ class Parser:
                 self.advance()
                 statements.append(Statement('equality', [left, right], line=line, goal=False))
 
+
         elif self.current().type == 'VARIABLE':
             if self.current().value not in OP_MAP:
                 self.regress()
-                if self.current().type in ('COLON','BE'): #this is a type
-                    self.advance() # var (self)
+                if self.current().type in ('COLON', 'BE'):  # this is a type
+                    self.advance()  # var (self)
                     make_operation = False
                 else:
                     self.advance()
                     make_operation = True
-
                 if make_operation:
                     expr = self.expr()
+                    if self.current().type == 'WITH_WITNESS':
+                        self.advance()
+                        witness = self.expr()
+                        expr.witness = witness
                     self.regress()
                     l = self.current().line
                     self.advance()
@@ -585,6 +591,10 @@ class Parser:
                     statements.append(s)
             else:
                 expr = self.expr()
+                if self.current().type == 'WITH_WITNESS':
+                    self.advance()
+                    witness = self.expr()
+                    expr.witness = witness
                 self.regress()
                 l = self.current().line
                 self.advance()
