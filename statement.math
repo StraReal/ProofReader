@@ -6,5 +6,6 @@ Hypothesis:
     let b be Int = 2*a
 
 Proof:
-    isEven b with witness a
-    print b
+    let t = (isEven b with witness 2)
+    ((2+3 equals 5) equals (isEven b with witness 2)) is true #correctly errors out, switch to "false" and it will work.
+    t is false

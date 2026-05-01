@@ -386,6 +386,18 @@ class Parser:
             prec, left_assoc = op_info.infix
             self.advance()
             left = Expression(op, left, self.expr(prec if left_assoc else prec - 1), witness=None, line=self.current().line_num)
+        if self.current().type == 'WITH_WITNESS':
+            WITH_WITNESS_PREC = -1
+            if prev_prec > WITH_WITNESS_PREC:
+                return left
+            if not isinstance(left, Expression):
+                print_error(self.current().line_num,
+                            "'with witness' must follow an operation",
+                            self.import_map)
+                sys.exit(1)
+            self.advance()
+            witness = self.expr()
+            left.witness = witness
         return left
 
     def atom(self):
@@ -580,10 +592,6 @@ class Parser:
                     make_operation = True
                 if make_operation:
                     expr = self.expr()
-                    if self.current().type == 'WITH_WITNESS':
-                        self.advance()
-                        witness = self.expr()
-                        expr.witness = witness
                     self.regress()
                     l = self.current().line
                     self.advance()
@@ -591,10 +599,6 @@ class Parser:
                     statements.append(s)
             else:
                 expr = self.expr()
-                if self.current().type == 'WITH_WITNESS':
-                    self.advance()
-                    witness = self.expr()
-                    expr.witness = witness
                 self.regress()
                 l = self.current().line
                 self.advance()
