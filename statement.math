@@ -7,3 +7,4 @@ Hypothesis:
 
 Proof:
     isEven b with witness a
+    print b

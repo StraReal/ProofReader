@@ -378,7 +378,6 @@ class Validator:
 
     def _call_op(self, op_def, bindings, witnessed=False):
         saved = {k: self.variables[k] for k in bindings if k in self.variables}
-        print(bindings)
         self.variables.update(bindings)
         result = None
         try:
@@ -1032,8 +1031,8 @@ class Validator:
                 else:
                     self.errors.append(self._err(stmt.line, f"Undefined type '{stmt.objects[1]}'"))
 
-        elif stmt.type == 'print':
-            print(self.solve_expression(stmt.objects[0]))
+        elif stmt.type == 'print': #this is wrong generally but idc for now
+            print(self.variables.get(stmt.objects[0])[1])
             return
 
         elif stmt.type == 'expression':
