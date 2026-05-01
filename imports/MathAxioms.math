@@ -27,6 +27,18 @@ operation Int gcd Int -> Int
         gives first
     gives second gcd (first mod second)
 
+operation isPrime Int -> Bool
+    if first <= 1
+        gives false
+    gives (first isPrimeHelper 2)
+
+operation Int isPrimeHelper Int -> Bool
+    if second * second > first
+        gives true
+    if first mod second equals 0
+        gives false
+    gives (first isPrimeHelper (second + 1))
+
 
 @[extern neg]
 operation - Int -> Int

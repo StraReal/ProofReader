@@ -761,6 +761,7 @@ class Validator:
                 if l_type == r_type:
                     return self.call_extern('eq_comp', left_value, right_value, expr.line, 'Bool')
                 else:
+                    print(expr)
                     self.errors.append(
                         self._err(expr.line, f"Operator {operator} is not defined for {l_type} and {r_type}"))
                     return None

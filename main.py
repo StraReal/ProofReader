@@ -39,7 +39,6 @@ simple_keywords = { #require space or end
     'getType': 'GETTYPE',
     'if': 'IF',
     'else': 'ELSE',
-    #'validate_assignment': 'VALIDATE_ASSIGNMENT',
 }
 
 colon_keywords = {

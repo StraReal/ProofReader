@@ -108,20 +108,12 @@ class Parser:
                 self.advance()
                 if self.current().type == 'COLON':
                     self.advance()
-                hypothesis = self.parse_hypothesis_block()
+                hypothesis = self.parse_block()
             else:
                 stmt = self.parse_statement()
                 if stmt:
                     proofs.extend(stmt)
         return self.axioms, self.theorems, hypothesis, proofs, [], ordered
-
-    def parse_hypothesis_block(self) -> HypothesisBlock:
-        statements = []
-        while self.current().type != 'DEDENT':
-            stmt = self.parse_statement()
-            if stmt:
-                statements.extend(stmt)
-        return HypothesisBlock(statements)
 
     def parse_named_block(self, block_keyword):
         line = self.current().line_num
@@ -361,13 +353,15 @@ class Parser:
         while True:
             tok = self.current()
             op = tok.type if tok.type in OP_MAP else tok.value if tok.value in OP_MAP else None
-
             if op is None:
-                break
+                if tok.type == 'VARIABLE':
+                    op = tok.value
+                    op_info = Operator(tok.value, infix=(HIGHEST_IMPORTANCE, True))
+                else:
+                    break
+            else:
+                op_info = OP_MAP[op]
 
-            op_info = OP_MAP[op]
-
-            # Handle postfix (e.g. x!)
             if op_info.postfix is not None:
                 prec = op_info.postfix
                 if prec <= prev_prec:
@@ -682,8 +676,6 @@ class Parser:
             self.advance()
             l = self.current().line
             expr = self.expr()
-            self.regress()
-            self.advance()
             s = Statement('gives', [expr, l.strip()], line=line)
             statements.append(s)
 
