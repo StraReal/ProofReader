@@ -15,4 +15,7 @@ externs = {
     'or':      lambda a, b: a or b,
     'exp':     lambda a, b: a ** b,
     'mod':     lambda a, b: a % b,
+    'len':     lambda a: len(a),
+    'in':      lambda a, b: any(elem[1] == a for elem in b),
+    'str_conv':lambda a: str(a),
 }

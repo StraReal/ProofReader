@@ -1,9 +1,10 @@
 import re
+from collections import defaultdict
 
 from common_classes import *
 from externs import externs
 
-NON_COMMUTATIVE = ['ASSIGN', 'FIELDACCESS', 'INDEXACCESS', 'DIVIDE', 'MINUS', 'MODULO', 'EXPONENT', 'GREATERTHAN', 'LESSTHAN', "GETHAN", "LETHAN"]
+NON_COMMUTATIVE = ['ASSIGN', 'FIELDACCESS', 'INDEXACCESS', 'DIVIDE', 'MINUS', 'MODULO', 'EXPONENT', 'GREATERTHAN', 'LESSTHAN', "GETHAN", "LETHAN", "IN", "INT_DIV", "INTO"]
 
 
 class Validator:
@@ -18,13 +19,11 @@ class Validator:
         self.import_map: dict = import_map
         self.last_let_failed: bool = False
         self.last_axiom_failed: bool = False
-        self.known_greater_than = set()
-        self.known_contains = set()
         self.contradictory = False
         self.congruence_pools: Dict[int, Set[str]] = {}  # pool_id → set of ident names
         self._next_pool_id: int = 1
         self.aliases = {}
-        self.facts = []
+        self.facts = defaultdict(list)
         self.call_depth = 0
         self.max_call_depth = 1000
         sys.setrecursionlimit((2**31)-1)
@@ -40,7 +39,7 @@ class Validator:
 
 
     def validate(self, axioms: Dict[str, AxiomDefinition],
-                 hypothesis: Optional[HypothesisBlock], ordered: List[Statement], proofs: List[Statement]) -> None:
+                 hypothesis: Optional[list], ordered: List[Statement], proofs: List[Statement]) -> None:
         self.axioms = axioms
 
         for kind, item in ordered:
@@ -317,44 +316,11 @@ class Validator:
         return total, symbolic
 
     def _concretize_statement(self, stmt, bindings):
-        """Return a new Statement with all variables substituted with bindings."""
-        if stmt.type in ('equality', 'inequality'):
+        if stmt.type in ('equality', 'assignment', 'inequality'):
             left = self.substitute_variables(stmt.objects[0], bindings)
             right = self.substitute_variables(stmt.objects[1], bindings)
-            return Statement(stmt.type, [left, right], line=stmt.line, goal=stmt.goal)
-
-        elif stmt.type == 'assignment':
-            left = self.substitute_variables(stmt.objects[0], bindings)
-            right = self.substitute_variables(stmt.objects[1], bindings)
-            return Statement(stmt.type, [left, right], line=stmt.line, goal=stmt.goal)
-
-        elif stmt.type in ('sum_assignment', 'sum_equality'):
-            new_objects = []
-            for obj in stmt.objects:
-                if isinstance(obj, list):
-                    new_objects.append([(s, self.substitute_variables(n, bindings)) for s, n in obj])
-                else:
-                    new_objects.append(self.substitute_variables(obj, bindings))
-            return Statement(stmt.type, new_objects, line=stmt.line, goal=stmt.goal)
-
-        elif stmt.type == 'contains':
-            segment = self.substitute_variables(stmt.objects[0], bindings)
-            point = self.substitute_variables(stmt.objects[1], bindings)
-            return Statement(stmt.type, [segment, point], line=stmt.line, goal=stmt.goal)
-
-        elif stmt.type == 'greater_than':
-            left = self.substitute_variables(stmt.objects[0], bindings)
-            right = self.substitute_variables(stmt.objects[1], bindings)
-            return Statement(stmt.type, [left, right], line=stmt.line, goal=stmt.goal)
-
-        elif stmt.type == 'let':
-            obj = self.substitute_variables(stmt.objects[0], bindings)
-            return Statement(stmt.type, [obj], line=stmt.line, goal=stmt.goal)
-
-        elif stmt.type in ('true', 'false'):
-            return Statement(stmt.type, stmt.objects, line=stmt.line, goal=stmt.goal)
-
-        return stmt
+            return ('equality', left, right)
+        return None
 
     def call_extern(self, extern_name: str, left_value, right_value, line, ret_type):
         """Call an external function by name"""
@@ -445,17 +411,23 @@ class Validator:
 
     def canonicalize_expression(self, expr):
         if type(expr) == Expression:
-            left = self.canonicalize_expression(expr.left) if type(expr.left) == Expression else expr.left
-            right = self.canonicalize_expression(expr.right) if type(expr.right) == Expression else expr.right
+            left = self.canonicalize_expression(expr.left)
+            right = self.canonicalize_expression(expr.right) if expr.right != 'none_for_unary' else 'none_for_unary'
 
-            if expr.operator not in NON_COMMUTATIVE:
-                left_type = left[0]
-                right_type = right[0]
-                if left_type > right_type:
+            if expr.operator not in NON_COMMUTATIVE and right != 'none_for_unary':
+                left_str = str(left)
+                right_str = str(right)
+                if left_str > right_str:
                     left, right = right, left
 
             return Expression(left=left, operator=expr.operator, right=right,
                               witness=expr.witness, line=expr.line)
+        elif isinstance(expr, tuple):
+            if expr[0] == 'VARIABLE':
+                var = self.variables.get(expr[1])
+                if var is not None and var[1] is not None and not isinstance(var[1], Expression):
+                    return self.canonicalize_expression((var[0], var[1]))
+            return expr
         else:
             return expr
 
@@ -478,16 +450,17 @@ class Validator:
             if expression.type == 'gives':
                 expr_to_evaluate = expression.objects[0]
                 return self.solve_expression(expr_to_evaluate)
+            elif expression.type == 'error':
+                self.errors.append(self._err(expression.line, self.solve_expression(expression.objects[0])[1]))
+                return None
             else:
                 self.solve_expression(expression, make_true=True)
                 return None
-        print('e', expression)
         if expression.operator == 'pass':
             return 'Bool', 'true'
 
         left = getattr(expression, 'left', None)
         right = getattr(expression, 'right', None)
-        print('re', right)
 
         expr = expression
         operator = expression.operator
@@ -548,6 +521,7 @@ class Validator:
                                         var[1]['_congruence'] = l_pool
                 return 'Bool', 'true'
 
+
         if type(left) == Expression:
             left = self.solve_expression(left)
         if type(right) == Expression:
@@ -562,6 +536,10 @@ class Validator:
             right = self.solve_expression(right)
             if isinstance(right, tuple) and right[0] == 'VARIABLE':
                 expression.right = right
+
+        if operator == 'EQUALS':
+            if self.has_fact(left, right):
+                return 'Bool', 'true'
 
         if left is None:
             return None
@@ -592,6 +570,10 @@ class Validator:
                 return None
 
             if x_value is None and not op_def[3] and expr.witness is None:
+                if self.has_fact(expr, ('Bool', 'true')):
+                    return op_def[0], 'true'
+                if self.has_fact(expr, ('Bool', 'false')):
+                    return op_def[0], 'false'
                 self.errors.append(self._err(expr.line, f"Cannot calculate expression with unknown (given: {left[1]})"))
                 return None
 
@@ -603,9 +585,15 @@ class Validator:
                     witness_val = self.solve_expression(expr.witness)
                     result = self._call_op(op_def, {'k': [witness_val[0], witness_val[1]], 'first': [x_type, x_value]},
                                            witnessed=True, line=expr.line)
+                    if result is None or result[1] == 'false':
+                        if self.has_fact(expr, ('Bool', 'true')):
+                            return op_def[0], 'true'
                     return result
                 else:
                     result = self._call_op(op_def, {'first': [x_type, x_value]}, line=expr.line)
+                    if result is None or result[1] == 'false':
+                        if self.has_fact(expr, ('Bool', 'true')):
+                            return op_def[0], 'true'
                     if result is None:
                         self.errors.append(self._err(expr.line, f"Operation {operator} produced no result"))
                         return None
@@ -723,6 +711,7 @@ class Validator:
                 else:
                     r_var = self.variables.get(right[1])
                     if r_var is None:
+                        self.errors.append(self._err(expr.line, f"{self.variables}"))
                         self.errors.append(self._err(expr.line, f"Undefined variable '{right[1]}'."))
                         return None
                     r_type = r_var[0]
@@ -774,7 +763,6 @@ class Validator:
                 if l_type == r_type:
                     return self.call_extern('eq_comp', left_value, right_value, expr.line, 'Bool')
                 else:
-                    print(expr)
                     self.errors.append(
                         self._err(expr.line, f"Operator {operator} is not defined for {l_type} and {r_type}"))
                     return None
@@ -852,7 +840,11 @@ class Validator:
                     extern_name = op_def[2]['extern'][0]
                     return self.call_extern(extern_name, left_value, right_value, expr.line, op_def[0])
                 else:
-                    result = self._call_op(op_def, {'first': [l_type, left_value], 'second': [r_type, right_value]}, line=expr.line)
+                    result = self._call_op(op_def, {'first': [l_type, left_value], 'second': [r_type, right_value]},
+                                           line=expr.line)
+                    if result is None or result[1] == 'false':
+                        if self.has_fact(expr, ('Bool', 'true')):
+                            return op_def[0], 'true'
                     if result is None:
                         self.errors.append(self._err(expr.line, f"Operation {operator} produced no result"))
                         return None
@@ -904,6 +896,18 @@ class Validator:
         self.variables[name] = entry
         return entry
 
+    def has_fact(self, left, right, s_type='eq'):
+        key = str(self.canonicalize_expression(left))
+        key_list = self.facts.get(key, [])
+        right_canon = str(self.canonicalize_expression(right))
+        return any(f[0] == s_type and str(self.canonicalize_expression(f[1])) == right_canon for f in key_list)
+
+    def add_fact(self, left, right, s_type='eq'):
+        left_canon = str(self.canonicalize_expression(left))
+        right_canon = str(self.canonicalize_expression(right))
+        self.facts[left_canon].append((s_type, right_canon))
+        self.facts[right_canon].append((s_type, left_canon))
+
     def process_statement(self, stmt: Statement, is_hypothesis: bool):
         make_true = is_hypothesis or (stmt.in_let and not self.last_let_failed)
         if self.contradictory:
@@ -916,6 +920,10 @@ class Validator:
             self.last_let_failed = False
             stmt_object = stmt.objects[0]
             value = stmt.value
+
+            if isinstance(stmt_object, Expression):
+                self.add_fact(stmt_object, value)
+                return
 
             if stmt_object[0] == 'VARIABLE':
                 def_type = None
@@ -1075,6 +1083,10 @@ class Validator:
                 for s in else_block:
                     self.process_statement(s, is_hypothesis)
 
+        elif stmt.type == 'error':
+            self.errors.append(self._err(stmt.line, self.solve_expression(stmt.objects[0])[1]))
+            return None
+
         else:
             print(f"Unknown statement type {stmt.type}")
 
@@ -1225,9 +1237,6 @@ class Validator:
                     return True
         return False
 
-    def has_fact(self, expr):
-        return any(self.expressions_equal(expr, f) for f in self.facts)
-
     def expressions_equal(self, a, b):
         if type(a) != type(b):
             return False
@@ -1283,10 +1292,10 @@ class Validator:
             bindings[numvar] = str(int(resolved)) if resolved == int(resolved) else str(resolved)
 
         for thesis in axiom.then:
-            concrete_stmt = self._concretize_statement(thesis, bindings)
-            if self._has_unknowns(concrete_stmt):
-                self.facts.append(concrete_stmt)
-            else:
-                self.process_statement(concrete_stmt, is_hypothesis=True)
+            concrete = self._concretize_statement(thesis, bindings)
+            if concrete is None:
+                continue
+            self.facts.append(concrete)
+
 
         return True

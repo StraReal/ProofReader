@@ -16,7 +16,9 @@ OP_MAP = {  # Use https://docs.python.org/3/reference/expressions.html#operator-
             'DIVIDE':     Operator('/',      infix=(7, True)),
             'PLUS':       Operator('+',      infix=(6, True)),
             'MINUS':      Operator('-',      infix=(6, True) ,        prefix=8),
+            'INTO':       Operator('into',   infix=(6, True)),
             'INEQUALS':   Operator('!=',     infix=(5, True)),
+            'IN':         Operator('in',     infix=(5, True)),
             'EQUALS':     Operator('equals', infix=(5, True)),
             'GETHAN':     Operator('>=',     infix=(5, True)),
             'LETHAN':     Operator('<=',     infix=(5, True)),
@@ -56,9 +58,13 @@ class Parser:
         self.pos -= 1
 
     def parse(self) -> tuple[Dict[str, AxiomDefinition], Dict[str, TheoremDefinition], Optional[list], List[Statement], list, list]:
-        hypothesis = None
+        hypothesis = []
+        hypothesis_to_append = []
         proofs = []
-        ordered = []
+        ordered : List[tuple[str, Any]] = [('type', ['Type', [], [], []]),]
+
+        hypothesis_to_append.append(Statement('let', [('VARIABLE', 'Type')], value=('LITSTR', 'Type'), line=self.current().line_num))
+        hypothesis_to_append.append(Statement('typehint', ['Type', 'Type'], line=self.current().line_num))
 
         while self.current().type != 'EOF':
             if self.current().type == 'AXIOM':
@@ -99,6 +105,8 @@ class Parser:
             elif self.current().type == 'TYPE':
                 td = self.parse_type()
                 self.types[td[0]] = td[0]
+                hypothesis_to_append.append(Statement('let', [('VARIABLE', td[0])], value=('LITSTR', td[0]), line=self.current().line_num))
+                hypothesis_to_append.append(Statement('typehint', [td[0], 'Type'], line=self.current().line_num))
                 ordered.append(('type', td)) # name, aliases, accepts, matches, witnesses
             elif self.current().type == 'IMPORT':
                 self.advance()
@@ -109,7 +117,8 @@ class Parser:
                 if self.current().type == 'COLON':
                     self.advance()
                 self.advance()
-                hypothesis = self.parse_block()
+                hypothesis.extend(hypothesis_to_append)
+                hypothesis.extend(self.parse_block())
             else:
                 stmt = self.parse_statement()
                 if stmt:
@@ -499,21 +508,26 @@ class Parser:
             self.advance()
             name_type = self.current().type
             name = self.current().value
-            self.advance()
+            left_expr = self.expr()
+            type_annotation = None
+
+            if self.current().type in ('COLON', 'BE'):
+                self.advance()
+                type_annotation = self.current().value
+                self.advance()
+            if self.current().type == 'ASSIGN':
+                self.advance()
+                value = self.expr()
+                s = Statement('let', [left_expr], value=value, line=line)
+                statements.append(s)
+            elif type(left_expr) is Expression and left_expr.operator == 'ASSIGN':
+                s = Statement('let', [left_expr.left], value=left_expr.right, line=line)
+                statements.append(s)
+
+            if type_annotation is not None:
+                statements.append(Statement('typehint', [name, type_annotation], line=line))
             value = None
-            if name_type == 'VARIABLE':
-                type_annotation = None
-                if self.current().type in ('COLON', 'BE'):
-                    self.advance()
-                    type_annotation = self.current().value
-                    self.advance()
-                if self.current().type == 'ASSIGN':
-                    self.advance()
-                    value = self.expr()
-                statements.append(Statement('let', [(name_type, name)], value=value, line=line))
-                if type_annotation is not None:
-                    statements.append(Statement('typehint', [name, type_annotation], line=line))
-            elif name_type == 'IDENT':
+            if name_type == 'IDENT':
                 if self.current().type == 'ASSIGN':
                     self.advance()
                     value = self.expr()
@@ -678,6 +692,15 @@ class Parser:
             l = self.current().line
             expr = self.expr()
             s = Statement('gives', [expr, l.strip()], line=line)
+            statements.append(s)
+
+        elif self.current().type == 'ERROR':
+            self.advance()
+            l = self.current().line
+            expr = ('LITSTR', "")
+            if self.current().type in ('VARIABLE', 'LPAR', 'IDENT', 'ANGLE') or self.current().type.startswith('LIT'):
+                expr = self.expr()
+            s = Statement('error', [expr, l.strip()], line=line)
             statements.append(s)
 
         else:

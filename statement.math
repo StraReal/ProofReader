@@ -2,9 +2,11 @@
 import MathAxioms
 
 Hypothesis:
-    let a be Int
-    let b be Int = 2*2
+    let a be Tuple = (0,2,3)
+    let s be string = "hello"
 
 Proof:
-    isPrime 12
-    isEven b with witness 2
+    (1 into Bool) equals true
+    (020 into Str) equals "20"
+    (123 into Int) equals 123
+    123 into Tuple

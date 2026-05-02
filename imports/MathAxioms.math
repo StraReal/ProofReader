@@ -1,8 +1,12 @@
 type Bool
+    alias boolean
 type Int
-type String
+    alias integer
+type Str
+    alias string
 type Tuple
-type Namedtuple
+type Dict
+    alias namedTuple
 
 
 operation Int <= Int -> Bool
@@ -17,6 +21,14 @@ operation isNatural Int -> Bool
 operation isEven Int -> Bool
     gives first mod 2 equals 0
     witness k be Int: first equals 2 * k
+
+
+operation fibonacci Int -> Int
+    if first equals 0
+        gives 0
+    if first equals 1
+        gives 1
+    gives (fibonacci (first-1)) + (fibonacci (first-2))
 
 operation Int gcd Int -> Int
     if second equals 0
@@ -93,6 +105,58 @@ operation Bool nor Bool -> Bool
 operation Bool xor Bool -> Bool
     gives not (first equals second)
 
+operation Bool != Bool -> Bool # yes, it's the same
+    gives not (first equals second)
+
+@[extern len]
+operation length Tuple -> Int
+
+
+@[extern add]
+operation Str + Str -> Str
+
+@[extern mul]
+operation Str * Int -> Str
+
+@[extern len]
+operation length Str -> Int
+
+@[extern in]
+operation Int in Tuple -> Bool
+
+@[extern in]
+operation Str in Tuple -> Bool
+
+@[extern in]
+operation Tuple in Tuple -> Bool
+
+@[extern in]
+operation Dict in Tuple -> Bool
+
+@[extern in]
+operation Bool in Tuple -> Bool
+
+
+@[extern in]
+operation Int in Str -> Bool
+
+@[extern in]
+operation Str in Str -> Bool
+
+@[extern str_conv]
+operation stringConvert Int -> Str
+
+@[extern str_conv]
+operation stringConvert Type -> Str
+
+operation Int into Type
+    if second equals Bool
+        gives first != 0
+    if second equals Str
+        gives stringConvert first
+    if second equals Int
+        gives first
+    error "Can't convert type Int into " + (stringConvert second)
 
 
 axiom SideSwitching:
@@ -100,4 +164,4 @@ axiom SideSwitching:
         let a be Int
         let b be Int
     Then:
-        a + b equals b + a
+        a + b = b + a

@@ -39,6 +39,8 @@ simple_keywords = { #require space or end
     'getType': 'GETTYPE',
     'if': 'IF',
     'else': 'ELSE',
+    'into': 'INTO',
+    'error': 'ERROR'
 }
 
 colon_keywords = {
@@ -312,7 +314,7 @@ def tokenize(code: str, import_map: dict) -> List[Token]:
                 if not closed:
                     print_error(line_num, f"Syntax Error: Unclosed quotes.",import_map)
                     sys.exit(1)
-                tokens.append(Token('LITSTRING', string, line_num, line))
+                tokens.append(Token('LITSTR', string.strip('"'), line_num, line))
                 pos += 1
                 continue
 
